@@ -1,5 +1,6 @@
 /****************************************************************************
  * libs/libc/math/lib_scalbnf.c
+<<<<<<< HEAD
  * get a float number of x*2^n
  *
  * This file is copy from musl libc
@@ -8,6 +9,14 @@
  * standard, POSIX, and widely agreed-upon extensions.
  * musl is lightweight, fast, simple, free, and strives to be correct in
  * the sense of standards-conformance and safety.
+=======
+ * get a double number of x*2^n
+ *
+ * This file is a part of NuttX:
+ *
+ *   Copyright (C) 2012 Gregory Nutt. All rights reserved.
+ *   Ported by: Darcy Gong
+>>>>>>> 2fb834ef17 (1)
  *
  *
  ****************************************************************************/
@@ -19,12 +28,16 @@
 #include <math.h>
 #include <stdint.h>
 
+<<<<<<< HEAD
 /****************************************************************************
  * Pre-processor definitions
  ****************************************************************************/
 
 #define FLT_MIN (0x1p-126f)
 
+=======
+#define FLT_MIN 0x1p-126f
+>>>>>>> 2fb834ef17 (1)
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
