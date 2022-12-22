@@ -2,19 +2,12 @@
  * libs/libc/math/lib_scalbn.c
  * get a double number of x*2^n
  *
-<<<<<<< HEAD
  * This file is copy from musl libc
  * musl is an implementation of the C standard library built on top of the
  * Linux system call API, including interfaces defined in the base language
  * standard, POSIX, and widely agreed-upon extensions.
  * musl is lightweight, fast, simple, free, and strives to be correct in
  * the sense of standards-conformance and safety.
-=======
- * This file is a part of NuttX:
- *
- *   Copyright (C) 2012 Gregory Nutt. All rights reserved.
- *   Ported by: Darcy Gong
->>>>>>> 2fb834ef17 (1)
  *
  *
  ****************************************************************************/
@@ -26,7 +19,6 @@
 #include <math.h>
 #include <stdint.h>
 
-<<<<<<< HEAD
 /****************************************************************************
  * Pre-processor definitions
  ****************************************************************************/
@@ -34,10 +26,6 @@
 #ifdef CONFIG_HAVE_DOUBLE
 #define DOUBLE_MIN (0x1p-1022)
 
-=======
-#ifdef CONFIG_HAVE_DOUBLE
-#define DOUBLE_MIN 0x1p-1022
->>>>>>> 2fb834ef17 (1)
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
