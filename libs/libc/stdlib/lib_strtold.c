@@ -88,7 +88,7 @@
 
 #define shgetc(f) (*(f)++)
 #define shunget(f) ((f)--)
-#define ifexist(a,b) do { if ((*a) != NULL) {*(a) = (b);} } while (0)
+#define ifexist(a,b) do { if ((a) != NULL) {*(a) = (b);} } while (0)
 
 /****************************************************************************
  * Private Functions
