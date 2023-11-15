@@ -26,6 +26,7 @@
 
 #include <stdbool.h>
 #include <nuttx/arch.h>
+#include <sched/sched.h>
 
 #include "sim_internal.h"
 
@@ -43,12 +44,14 @@ void *sim_doirq(int irq, void *context)
 
   xcpt_reg_t tmp[XCPTCONTEXT_REGS];
   void *regs = (void *)tmp;
+  int ret;
 
   /* CURRENT_REGS non-zero indicates that we are processing an interrupt.
    * CURRENT_REGS is also used to manage interrupt level context switches.
    */
 
-  if (sim_saveusercontext(regs) == 0)
+  sim_saveusercontext(regs, ret);
+  if (ret == 0)
     {
       CURRENT_REGS = regs;
 
@@ -61,6 +64,16 @@ void *sim_doirq(int irq, void *context)
        * different from the input regs, then the lower level will know that
        * context switch occurred during interrupt processing.
        */
+
+      if (regs != CURRENT_REGS)
+        {
+          /* Record the new "running" task when context switch occurred.
+           * g_running_tasks[] is only used by assertion logic for reporting
+           * crashes.
+           */
+
+          g_running_tasks[this_cpu()] = this_task();
+        }
 
       regs = (void *)CURRENT_REGS;
 
@@ -76,5 +89,5 @@ void *sim_doirq(int irq, void *context)
       sim_fullcontextrestore(regs);
     }
 
-  return regs;
+  return NULL;
 }

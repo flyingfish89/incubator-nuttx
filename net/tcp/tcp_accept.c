@@ -217,13 +217,11 @@ int psock_tcp_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
   struct accept_s state;
   int ret;
 
-  DEBUGASSERT(psock && newconn);
-
   /* Check the backlog to see if there is a connection already pending for
    * this listener.
    */
 
-  conn = (FAR struct tcp_conn_s *)psock->s_conn;
+  conn = psock->s_conn;
 
 #ifdef CONFIG_NET_TCPBACKLOG
   state.acpt_newconn = tcp_backlogremove(conn);
@@ -268,10 +266,10 @@ int psock_tcp_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
       conn->accept          = accept_eventhandler;
 
       /* Wait for the send to complete or an error to occur:  NOTES:
-       * net_lockedwait will also terminate if a signal is received.
+       * net_sem_wait will also terminate if a signal is received.
        */
 
-      ret = net_lockedwait(&state.acpt_sem);
+      ret = net_sem_wait(&state.acpt_sem);
 
       /* Make sure that no further events are processed */
 
@@ -290,8 +288,8 @@ int psock_tcp_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
           return -state.acpt_result;
         }
 
-      /* If net_lockedwait failed, then we were probably reawakened by a
-       * signal.  In this case, net_lockedwait will have returned negated
+      /* If net_sem_wait failed, then we were probably reawakened by a
+       * signal.  In this case, net_sem_wait will have returned negated
        * errno appropriately.
        */
 

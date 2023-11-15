@@ -27,13 +27,11 @@
 
 #include <nuttx/compiler.h>
 
+#include <sys/param.h>
+
 /****************************************************************************
  * Pre-processor definitions
  ****************************************************************************/
-
-#ifndef ARRAY_SIZE
-#  define ARRAY_SIZE(x)         (sizeof(x) / sizeof((x)[0]))
-#endif
 
 #define RPMSGDEV_NAME_PREFIX     "rpmsgdev-"
 #define RPMSGDEV_NAME_PREFIX_LEN 9
@@ -41,11 +39,12 @@
 #define RPMSGDEV_OPEN            1
 #define RPMSGDEV_CLOSE           2
 #define RPMSGDEV_READ            3
-#define RPMSGDEV_WRITE           4
-#define RPMSGDEV_LSEEK           5
-#define RPMSGDEV_IOCTL           6
-#define RPMSGDEV_POLL            7
-#define RPMSGDEV_NOTIFY          8
+#define RPMSGDEV_READ_NOFRAG     4
+#define RPMSGDEV_WRITE           5
+#define RPMSGDEV_LSEEK           6
+#define RPMSGDEV_IOCTL           7
+#define RPMSGDEV_POLL            8
+#define RPMSGDEV_NOTIFY          9
 
 /****************************************************************************
  * Public Types

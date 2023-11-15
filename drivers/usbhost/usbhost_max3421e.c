@@ -31,6 +31,7 @@
 
 #include <nuttx/config.h>
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -111,18 +112,6 @@
 #define MAX3421E_SETUP_DELAY         SEC2TICK(5) /* 5 seconds in system ticks */
 #define MAX3421E_DATANAK_DELAY       SEC2TICK(5) /* 5 seconds in system ticks */
 #define MAX3421E_RETRY_COUNT         5           /* Number of tries before giving up */
-
-/* Ever-present MIN/MAX macros */
-
-#ifndef MIN
-#  define  MIN(a, b) (((a) < (b)) ? (a) : (b))
-#endif
-
-#ifndef MAX
-#  define  MAX(a, b) (((a) > (b)) ? (a) : (b))
-#endif
-
-#define NO_HOLDER               (INVALID_PROCESS_ID)
 
 /* Debug ********************************************************************/
 
@@ -229,6 +218,8 @@ struct max3421e_usbhost_s
 
   FAR struct usbhost_hubport_s *hport;
 #endif
+
+  struct usbhost_devaddr_s devgen;  /* Address generation data */
 
   /* The channel waiting for the next event (there will only be one in
    * this design)
@@ -3790,7 +3781,7 @@ static int max3421e_alloc(FAR struct usbhost_driver_s *drvr,
 
   /* There is no special memory requirement for the MAX3421E. */
 
-  alloc = (FAR uint8_t *)kmm_malloc(CONFIG_MAX3421E_DESCSIZE);
+  alloc = kmm_malloc(CONFIG_MAX3421E_DESCSIZE);
   if (!alloc)
     {
       return -ENOMEM;
@@ -3875,7 +3866,7 @@ static int max3421e_ioalloc(FAR struct usbhost_driver_s *drvr,
 
   /* There is no special memory requirement */
 
-  alloc = (FAR uint8_t *)kmm_malloc(buflen);
+  alloc = kmm_malloc(buflen);
   if (!alloc)
     {
       return -ENOMEM;
@@ -4692,7 +4683,8 @@ static inline int max3421e_sw_initialize(FAR struct max3421e_usbhost_s *priv,
 
   /* Initialize function address generation logic */
 
-  usbhost_devaddr_initialize(&priv->rhport);
+  usbhost_devaddr_initialize(&priv->devgen);
+  priv->rhport.pdevgen = &priv->devgen;
 
   /* Initialize semaphores */
 
@@ -4710,7 +4702,6 @@ static inline int max3421e_sw_initialize(FAR struct max3421e_usbhost_s *priv,
   priv->connected = false;
   priv->irqset    = 0;
   priv->change    = false;
-  priv->holder    = NO_HOLDER;
 
   /* Put all of the channels back in their initial, allocated state */
 

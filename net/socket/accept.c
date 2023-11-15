@@ -139,10 +139,14 @@ int psock_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
 
   /* Let the address family's accept() method handle the operation */
 
-  DEBUGASSERT(psock->s_sockif != NULL && psock->s_sockif->si_accept != NULL);
+  DEBUGASSERT(psock->s_sockif != NULL);
+  if (psock->s_sockif->si_accept == NULL)
+    {
+      return -EOPNOTSUPP;
+    }
 
   net_lock();
-  ret = psock->s_sockif->si_accept(psock, addr, addrlen, newsock);
+  ret = psock->s_sockif->si_accept(psock, addr, addrlen, newsock, flags);
   if (ret >= 0)
     {
       /* Mark the new socket as connected. */
@@ -313,28 +317,6 @@ errout_with_alloc:
 errout:
   leave_cancellation_point();
 
-  _SO_SETERRNO(psock, errcode);
+  set_errno(errcode);
   return ERROR;
-}
-
-/****************************************************************************
- * Name: accept
- *
- * Description:
- *   The accept() call is identical to accept4() with a zero flags.
- *
- * Input Parameters:
- *   sockfd   The listening socket descriptor
- *   addr     Receives the address of the connecting client
- *   addrlen  Input: allocated size of 'addr',
- *            Return: returned size of 'addr'
- *
- * Returned Value:
- *  (see accept4)
- *
- ****************************************************************************/
-
-int accept(int sockfd, FAR struct sockaddr *addr, FAR socklen_t *addrlen)
-{
-  return accept4(sockfd, addr, addrlen, 0);
 }

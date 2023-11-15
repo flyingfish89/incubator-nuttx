@@ -135,7 +135,7 @@ static void nxmq_sndtimeout(wdparm_t pid)
  *   EAGAIN   The queue was empty, and the O_NONBLOCK flag was set for the
  *            message queue description referred to by mq.
  *   EINVAL   Either msg or mq is NULL or the value of prio is invalid.
- *   EPERM    Message queue opened not opened for writing.
+ *   EBADF    Message queue opened not opened for writing.
  *   EMSGSIZE 'msglen' was greater than the maxmsgsize attribute of the
  *            message queue.
  *   EINTR    The call was interrupted by a signal handler.
@@ -245,7 +245,7 @@ int file_mq_timedsend(FAR struct file *mq, FAR const char *msg,
 
   /* Start the watchdog and begin the wait for MQ not full */
 
-  wd_start(&rtcb->waitdog, ticks, nxmq_sndtimeout, gettid());
+  wd_start(&rtcb->waitdog, ticks, nxmq_sndtimeout, nxsched_gettid());
 
   /* And wait for the message queue to be non-empty */
 
@@ -317,7 +317,7 @@ errout_in_critical_section:
  *   EAGAIN   The queue was empty, and the O_NONBLOCK flag was set for the
  *            message queue description referred to by mqdes.
  *   EINVAL   Either msg or mqdes is NULL or the value of prio is invalid.
- *   EPERM    Message queue opened not opened for writing.
+ *   EBADF    Message queue opened not opened for writing.
  *   EMSGSIZE 'msglen' was greater than the maxmsgsize attribute of the
  *            message queue.
  *   EINTR    The call was interrupted by a signal handler.
@@ -381,7 +381,7 @@ int nxmq_timedsend(mqd_t mqdes, FAR const char *msg, size_t msglen,
  *   EAGAIN   The queue was full, and the O_NONBLOCK flag was set for the
  *            message queue description referred to by mqdes.
  *   EINVAL   Either msg or mqdes is NULL or the value of prio is invalid.
- *   EPERM    Message queue opened not opened for writing.
+ *   EBADF    Message queue opened not opened for writing.
  *   EMSGSIZE 'msglen' was greater than the maxmsgsize attribute of the
  *            message queue.
  *   EINTR    The call was interrupted by a signal handler.

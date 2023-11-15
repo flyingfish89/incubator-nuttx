@@ -110,7 +110,7 @@ static int do_bind_request(FAR struct usrsock_conn_s *conn,
   bufs[1].iov_base = (FAR void *)addr;
   bufs[1].iov_len = req.addrlen;
 
-  return usrsock_do_request(conn, bufs, ARRAY_SIZE(bufs));
+  return usrsock_do_request(conn, bufs, nitems(bufs));
 }
 
 /****************************************************************************
@@ -156,8 +156,6 @@ int usrsock_bind(FAR struct socket *psock,
 
   int ret;
 
-  DEBUGASSERT(conn);
-
   net_lock();
 
   if (conn->state == USRSOCK_CONN_STATE_UNINITIALIZED ||
@@ -191,7 +189,7 @@ int usrsock_bind(FAR struct socket *psock,
     {
       /* Wait for completion of request. */
 
-      net_lockedwait_uninterruptible(&state.recvsem);
+      net_sem_wait_uninterruptible(&state.recvsem);
       ret = state.result;
     }
 

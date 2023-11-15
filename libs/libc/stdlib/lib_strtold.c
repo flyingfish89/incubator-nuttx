@@ -119,7 +119,7 @@ static long_long scanexp(FAR char **f, bool flag)
 
   c = shgetc(s);
 
-  if (c == '+' || c == '-')
+  if ((c == '+' || c == '-') && isdigit(*s))
     {
       neg = (c == '-');
       c = shgetc(s);
@@ -335,14 +335,8 @@ static long_double decfloat(FAR char *ptr, FAR char **endptr)
         }
     }
 
-  if (num_digit == 0)
-    {
-      shunget(f);
-      ifexist(endptr, f);
-      return zero;
-    }
-
-  if ((c | 32) == 'e')
+  if ((c | 32) == 'e' && (isdigit(*f) || ((*f == '+' || *f == '-') &&
+                                          (isdigit(*(f + 1))))))
     {
       num_decimal = scanexp(&f, 1) + num_decimal;
       if (num_decimal <= llong_min / 100)
@@ -357,6 +351,11 @@ static long_double decfloat(FAR char *ptr, FAR char **endptr)
     }
 
   ifexist(endptr, f);
+  if (num_digit == 0)
+    {
+      return zero;
+    }
+
   f = ptr;
 
   k = 0;
@@ -394,19 +393,17 @@ static long_double decfloat(FAR char *ptr, FAR char **endptr)
         }
     }
 
-  if (num_digit <= 9 && num_decimal == 0)
+  if (num_digit < 9 && num_decimal == 0)
     {
       return x;
     }
   else if (num_digit + num_decimal > ldbl_max_10_exp)
     {
-      errno = ERANGE;
-      return ldbl_max * ldbl_max;
+      set_errno(ERANGE);
     }
   else if (num_digit + num_decimal < ldbl_min_10_exp)
     {
-      errno = ERANGE;
-      return ldbl_min * ldbl_min;
+      set_errno(ERANGE);
     }
 
   if (k % 9)
@@ -477,7 +474,7 @@ static long_double hexfloat(FAR char *ptr,
         }
     }
 
-  for (; c - '0' < 10 || (c | 32) - 'a' < 6 || c == '.'; c = shgetc(f))
+  for (; isxdigit(c) || c == '.'; c = shgetc(f))
     {
       if (c == '.')
         {
@@ -522,7 +519,6 @@ static long_double hexfloat(FAR char *ptr,
   if (!gotdig)
     {
       shunget(f);
-      shunget(f);
       if (gotrad)
         {
           shunget(f);
@@ -565,13 +561,13 @@ static long_double hexfloat(FAR char *ptr,
 
   if (e2 > -emin)
     {
-      errno = ERANGE;
+      set_errno(ERANGE);
       return ldbl_max * ldbl_max;
     }
 
   if (e2 < emin - 2 * ldbl_mant_dig)
     {
-      errno = ERANGE;
+      set_errno(ERANGE);
       return ldbl_min * ldbl_min;
     }
 
@@ -617,7 +613,7 @@ static long_double hexfloat(FAR char *ptr,
 
   if (!y)
     {
-      errno = ERANGE;
+      set_errno(ERANGE);
     }
 
   return scalbnx(y, 2., e2);
@@ -644,7 +640,7 @@ static long_double hexfloat(FAR char *ptr,
 static long_double strtox(FAR const char *str, FAR char **endptr, int flag)
 {
   FAR char *s = (FAR char *)str;
-  int negative = 0;
+  bool negative = 0;
   long_double y = 0;
   int i = 0;
 
@@ -664,6 +660,7 @@ static long_double strtox(FAR const char *str, FAR char **endptr, int flag)
       case 3:
         bits = LDBL_MANT_DIG,
         emin = LDBL_MIN_EXP - bits;
+        break;
       default:
         return 0;
     }
@@ -714,14 +711,20 @@ static long_double strtox(FAR const char *str, FAR char **endptr, int flag)
 
   /* Process optional 0x prefix */
 
+  s -= i;
   if (*s == '0' && (*(s + 1) | 32) == 'x')
     {
       s += 2;
       y = hexfloat(s, endptr, bits, emin);
     }
-  else
+  else if (isdigit(*s) || (*s == '.' && isdigit(*(s + 1))))
     {
       y = decfloat(s, endptr);
+    }
+  else
+    {
+      ifexist(endptr, (FAR char *)str);
+      return 0;
     }
 
   return negative ? -y : y;

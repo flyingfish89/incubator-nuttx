@@ -242,7 +242,7 @@ int pm_changestate(int domain, enum pm_state_e newstate)
    * re-enabled.
    */
 
-  flags = pm_lock(domain);
+  flags = pm_domain_lock(domain);
 
   if (newstate != PM_RESTORE)
     {
@@ -286,7 +286,7 @@ int pm_changestate(int domain, enum pm_state_e newstate)
 
   /* Restore the interrupt state */
 
-  pm_unlock(domain, flags);
+  pm_domain_unlock(domain, flags);
   return ret;
 }
 
@@ -306,6 +306,7 @@ int pm_changestate(int domain, enum pm_state_e newstate)
 
 enum pm_state_e pm_querystate(int domain)
 {
+  DEBUGASSERT(domain >= 0 && domain < CONFIG_PM_NDOMAINS);
   return g_pmglobals.domain[domain].state;
 }
 

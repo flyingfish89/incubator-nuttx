@@ -128,7 +128,7 @@ static int do_setsockopt_request(FAR struct usrsock_conn_s *conn,
   bufs[1].iov_base = (FAR void *)value;
   bufs[1].iov_len = req.valuelen;
 
-  return usrsock_do_request(conn, bufs, ARRAY_SIZE(bufs));
+  return usrsock_do_request(conn, bufs, nitems(bufs));
 }
 
 /****************************************************************************
@@ -166,8 +166,6 @@ int usrsock_setsockopt(FAR struct socket *psock, int level, int option,
   };
 
   int ret;
-
-  DEBUGASSERT(conn);
 
   /* SO_[RCV|SND]TIMEO have to be handled locally to break the block i/o */
 
@@ -210,7 +208,7 @@ int usrsock_setsockopt(FAR struct socket *psock, int level, int option,
     {
       /* Wait for completion of request. */
 
-      net_lockedwait_uninterruptible(&state.recvsem);
+      net_sem_wait_uninterruptible(&state.recvsem);
       ret = state.result;
     }
 

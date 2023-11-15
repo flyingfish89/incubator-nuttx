@@ -83,11 +83,33 @@ BIN  = libarch$(LIBEXT)
 ARCHSCRIPT := $(call CONVERT_PATH,$(ARCHSCRIPT))
 LDFLAGS += $(addprefix -T,$(addsuffix .tmp,$(ARCHSCRIPT))) $(EXTRALINKCMDS)
 
+$(foreach lib,$(notdir $(wildcard $(APPDIR)$(DELIM)staging$(DELIM)*$(LIBEXT))), \
+  $(foreach elib,$(EXTRA_LIBS), \
+    $(if $(filter $(notdir $(elib)),$(lib)), \
+      $(eval NAMEFULL_LIBS+=$(elib)), \
+      $(if $(filter $(notdir $(elib)),$(patsubst lib%$(LIBEXT),-l%,$(lib))), \
+        $(eval NAMESPEC_LIBS+=$(elib)) \
+       ) \
+     ) \
+   ) \
+ )
+
+EXTRA_LIBS := $(filter-out $(NAMEFULL_LIBS) $(NAMESPEC_LIBS),$(EXTRA_LIBS))
+EXTRA_LIBS += $(wildcard $(APPDIR)$(DELIM)staging$(DELIM)*$(LIBEXT))
+
 ifeq ($(LD),$(CC))
+  ifeq ($(CONFIG_STACK_CANARIES),y)
+    # filter out ssp(Stack Smashing Protector) related flags:
+    #  -fstack-protector
+    #  -fstack-protector-all
+    #  -fstack-protector-strong
+    #  -fstack-protector-explicit
+    STRIPCFLAGS = $(filter -fstack-protector%,$(CFLAGS))
+  endif
   LDSTARTGROUP ?= -Wl,--start-group
   LDENDGROUP   ?= -Wl,--end-group
   LDFLAGS      := $(addprefix -Xlinker ,$(LDFLAGS))
-  LDFLAGS      += $(CFLAGS)
+  LDFLAGS      += $(filter-out $(STRIPCFLAGS),$(CFLAGS))
 else
   LDSTARTGROUP ?= --start-group
   LDENDGROUP   ?= --end-group
@@ -136,7 +158,7 @@ board/libboard$(LIBEXT):
 
 define LINK_ALLSYMS
 	$(Q) $(TOPDIR)/tools/mkallsyms.py $(NUTTX) allsyms.tmp
-	$(Q) $(call COMPILE, -x c allsyms.tmp, allsyms$(OBJEXT))
+	$(Q) $(call COMPILE, allsyms.tmp, allsyms$(OBJEXT), -x c)
 	$(Q) $(LD) --entry=__start $(LDFLAGS) $(LIBPATHS) $(EXTRA_LIBPATHS) \
 		-o $(NUTTX) $(STARTUP_OBJS) allsyms$(OBJEXT) $(EXTRA_OBJS) \
 		$(LDSTARTGROUP) $(LDLIBS) $(EXTRA_LIBS) $(LDENDGROUP)

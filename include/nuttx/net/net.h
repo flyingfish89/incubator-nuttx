@@ -35,6 +35,7 @@
 #include <semaphore.h>
 
 #include <nuttx/queue.h>
+#include <nuttx/mutex.h>
 #ifdef CONFIG_MM_IOB
 #  include <nuttx/mm/iob.h>
 #endif
@@ -116,7 +117,7 @@ enum net_lltype_e
 
 /* This defines a bitmap big enough for one bit for each socket option */
 
-typedef uint16_t sockopt_t;
+typedef uint32_t sockopt_t;
 
 /* This defines the storage size of a timeout value.  This effects only
  * range of supported timeout values.  With an LSB in seciseconds, the
@@ -141,7 +142,7 @@ struct pollfd;  /* Forward reference */
 
 struct sock_intf_s
 {
-  CODE int        (*si_setup)(FAR struct socket *psock, int protocol);
+  CODE int        (*si_setup)(FAR struct socket *psock);
   CODE sockcaps_t (*si_sockcaps)(FAR struct socket *psock);
   CODE void       (*si_addref)(FAR struct socket *psock);
   CODE int        (*si_bind)(FAR struct socket *psock,
@@ -155,7 +156,7 @@ struct sock_intf_s
                     FAR const struct sockaddr *addr, socklen_t addrlen);
   CODE int        (*si_accept)(FAR struct socket *psock,
                     FAR struct sockaddr *addr, FAR socklen_t *addrlen,
-                    FAR struct socket *newsock);
+                    FAR struct socket *newsock, int flags);
   CODE int        (*si_poll)(FAR struct socket *psock,
                     FAR struct pollfd *fds, bool setup);
   CODE ssize_t    (*si_sendmsg)(FAR struct socket *psock,
@@ -166,6 +167,7 @@ struct sock_intf_s
   CODE int        (*si_ioctl)(FAR struct socket *psock,
                     int cmd, unsigned long arg);
   CODE int        (*si_socketpair)(FAR struct socket *psocks[2]);
+  CODE int        (*si_shutdown)(FAR struct socket *psock, int how);
 #ifdef CONFIG_NET_SOCKOPTS
   CODE int        (*si_getsockopt)(FAR struct socket *psock, int level,
                     int option, FAR void *value, FAR socklen_t *value_len);
@@ -202,10 +204,6 @@ struct socket_conn_s
   FAR struct devif_callback_s *list;
   FAR struct devif_callback_s *list_tail;
 
-  /* Definitions of 8-bit socket flags */
-
-  uint8_t       s_flags;     /* See _SF_* definitions */
-
   /* Socket options */
 
 #ifdef CONFIG_NET_SOCKOPTS
@@ -213,13 +211,25 @@ struct socket_conn_s
   sockopt_t     s_options;   /* Selected socket options */
   socktimeo_t   s_rcvtimeo;  /* Receive timeout value (in deciseconds) */
   socktimeo_t   s_sndtimeo;  /* Send timeout value (in deciseconds) */
-#ifdef CONFIG_NET_SOLINGER
+#  ifdef CONFIG_NET_SOLINGER
   socktimeo_t   s_linger;    /* Linger timeout value (in deciseconds) */
-#endif
-#ifdef CONFIG_NET_BINDTODEVICE
+#  endif
+#  ifdef CONFIG_NET_BINDTODEVICE
   uint8_t       s_boundto;   /* Index of the interface we are bound to.
                               * Unbound: 0, Bound: 1-MAX_IFINDEX */
+#  endif
 #endif
+
+  /* Definitions of 8-bit socket flags */
+
+  uint8_t       s_flags;     /* See _SF_* definitions */
+
+  /* Definitions of IPv4 TOS and IPv6 Traffic Class */
+
+  uint8_t       s_tos;       /* IPv4 Type of Service */
+#define s_tclass s_tos       /* IPv6 traffic class defination */
+#if defined(CONFIG_NET_IPv4) || defined(CONFIG_NET_IPv6)
+  uint8_t       ttl;         /* Default time-to-live */
 #endif
 
   /* Connection-specific content may follow */
@@ -291,7 +301,7 @@ void net_initialize(void);
  *   Calculate the ioctl argument buffer length.
  *
  * Input Parameters:
- *
+ *   domain   The socket domain
  *   cmd      The ioctl command
  *
  * Returned Value:
@@ -299,7 +309,7 @@ void net_initialize(void);
  *
  ****************************************************************************/
 
-ssize_t net_ioctl_arglen(int cmd);
+ssize_t net_ioctl_arglen(uint8_t domain, int cmd);
 
 /****************************************************************************
  * Critical section management.
@@ -308,7 +318,7 @@ ssize_t net_ioctl_arglen(int cmd);
  *
  *   net_lock()        - Locks the network via a re-entrant mutex.
  *   net_unlock()      - Unlocks the network.
- *   net_lockedwait()  - Like pthread_cond_wait() except releases the
+ *   net_sem_wait()    - Like pthread_cond_wait() except releases the
  *                       network momentarily to wait on another semaphore.
  *   net_ioballoc()    - Like iob_alloc() except releases the network
  *                       momentarily to wait for an IOB to become
@@ -369,7 +379,7 @@ int net_trylock(void);
 void net_unlock(void);
 
 /****************************************************************************
- * Name: net_timedwait
+ * Name: net_sem_timedwait
  *
  * Description:
  *   Atomically wait for sem (or a timeout( while temporarily releasing
@@ -390,10 +400,34 @@ void net_unlock(void);
  *
  ****************************************************************************/
 
-int net_timedwait(sem_t *sem, unsigned int timeout);
+int net_sem_timedwait(sem_t *sem, unsigned int timeout);
 
 /****************************************************************************
- * Name: net_lockedwait
+ * Name: net_mutex_timedlock
+ *
+ * Description:
+ *   Atomically wait for mutex (or a timeout) while temporarily releasing
+ *   the lock on the network.
+ *
+ *   Caution should be utilized.  Because the network lock is relinquished
+ *   during the wait, there could be changes in the network state that occur
+ *   before the lock is recovered.  Your design should account for this
+ *   possibility.
+ *
+ * Input Parameters:
+ *   mutex   - A reference to the mutex to be taken.
+ *   timeout - The relative time to wait until a timeout is declared.
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is returned on
+ *   any failure.
+ *
+ ****************************************************************************/
+
+int net_mutex_timedlock(mutex_t *mutex, unsigned int timeout);
+
+/****************************************************************************
+ * Name: net_sem_wait
  *
  * Description:
  *   Atomically wait for sem while temporarily releasing the network lock.
@@ -412,13 +446,35 @@ int net_timedwait(sem_t *sem, unsigned int timeout);
  *
  ****************************************************************************/
 
-int net_lockedwait(sem_t *sem);
+int net_sem_wait(sem_t *sem);
 
 /****************************************************************************
- * Name: net_timedwait_uninterruptible
+ * Name: net_mutex_lock
  *
  * Description:
- *   This function is wrapped version of net_timedwait(), which is
+ *   Atomically wait for mutex while temporarily releasing the network lock.
+ *
+ *   Caution should be utilized.  Because the network lock is relinquished
+ *   during the wait, there could be changes in the network state that occur
+ *   before the lock is recovered.  Your design should account for this
+ *   possibility.
+ *
+ * Input Parameters:
+ *   mutex - A reference to the mutex to be taken.
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is returned on
+ *   any failure.
+ *
+ ****************************************************************************/
+
+int net_mutex_lock(mutex_t *mutex);
+
+/****************************************************************************
+ * Name: net_sem_timedwait_uninterruptible
+ *
+ * Description:
+ *   This function is wrapped version of net_sem_timedwait(), which is
  *   uninterruptible and convenient for use.
  *
  * Input Parameters:
@@ -431,13 +487,13 @@ int net_lockedwait(sem_t *sem);
  *
  ****************************************************************************/
 
-int net_timedwait_uninterruptible(sem_t *sem, unsigned int timeout);
+int net_sem_timedwait_uninterruptible(sem_t *sem, unsigned int timeout);
 
 /****************************************************************************
- * Name: net_lockedwait_uninterruptible
+ * Name: net_sem_wait_uninterruptible
  *
  * Description:
- *   This function is wrapped version of net_lockedwait(), which is
+ *   This function is wrapped version of net_sem_wait(), which is
  *   uninterruptible and convenient for use.
  *
  * Input Parameters:
@@ -449,7 +505,7 @@ int net_timedwait_uninterruptible(sem_t *sem, unsigned int timeout);
  *
  ****************************************************************************/
 
-int net_lockedwait_uninterruptible(sem_t *sem);
+int net_sem_wait_uninterruptible(sem_t *sem);
 
 #ifdef CONFIG_MM_IOB
 
@@ -1215,6 +1271,40 @@ int psock_getpeername(FAR struct socket *psock, FAR struct sockaddr *addr,
 
 int psock_vioctl(FAR struct socket *psock, int cmd, va_list ap);
 int psock_ioctl(FAR struct socket *psock, int cmd, ...);
+
+/****************************************************************************
+ * Name: psock_shutdown
+ *
+ * Description:
+ *   The shutdown() function will cause all or part of a full-duplex
+ *   connection on the socket associated with the file descriptor socket to
+ *   be shut down.
+ *
+ *   The shutdown() function disables subsequent send and/or receive
+ *   operations on a socket, depending on the value of the how argument.
+ *
+ * Input Parameters:
+ *   sockfd - Specifies the file descriptor of the socket.
+ *   how    - Specifies the type of shutdown. The values are as follows:
+ *
+ *     SHUT_RD   - Disables further receive operations.
+ *     SHUT_WR   - Disables further send operations.
+ *     SHUT_RDWR - Disables further send and receive operations.
+ *
+ * Returned Value:
+ *   On success, returns the number of characters sent.  On any failure, a
+ *   negated errno value is returned.  One of:
+ *
+ *     EINVAL     - The how argument is invalid.
+ *     ENOTCONN   - The socket is not connected.
+ *     ENOTSOCK   - The socket argument does not refer to a socket.
+ *     ENOBUFS    - Insufficient resources were available in the system to
+ *                  perform the operation.
+ *     EOPNOTSUPP - The operation is not supported for this socket's protocol
+ *
+ ****************************************************************************/
+
+int psock_shutdown(FAR struct socket *psock, int how);
 
 /****************************************************************************
  * Name: psock_poll

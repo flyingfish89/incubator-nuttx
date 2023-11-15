@@ -129,8 +129,8 @@ static int arp_in(FAR struct net_driver_s *dev)
             net_ipv4addr_hdrcopy(arp->ah_sipaddr, &dev->d_ipaddr);
             arp_dump(arp);
 
-            eth->type           = HTONS(ETHTYPE_ARP);
-            dev->d_len          = sizeof(struct arp_hdr_s) + ETH_HDRLEN;
+            eth->type  = HTONS(ETHTYPE_ARP);
+            dev->d_len = sizeof(struct arp_hdr_s) + ETH_HDRLEN;
           }
         break;
 
@@ -195,8 +195,7 @@ void arp_input(FAR struct net_driver_s *dev)
 
       /* Set the device buffer to l2 */
 
-      dev->d_buf = &dev->d_iob->io_data[CONFIG_NET_LL_GUARDSIZE -
-                                        NET_LL_HDRLEN(dev)];
+      dev->d_buf = NETLLBUF;
       arp_in(dev);
 
       dev->d_buf = buf;

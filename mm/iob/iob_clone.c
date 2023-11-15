@@ -25,6 +25,7 @@
 #include <nuttx/config.h>
 
 #include <string.h>
+#include <sys/param.h>
 #include <assert.h>
 #include <errno.h>
 #include <debug.h>
@@ -32,14 +33,6 @@
 #include <nuttx/mm/iob.h>
 
 #include "iob.h"
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#ifndef MIN
-#  define MIN(a,b) ((a) < (b) ? (a) : (b))
-#endif
 
 /****************************************************************************
  * Static Functions
@@ -116,8 +109,8 @@ static int iob_next(FAR struct iob_s *iob, bool throttled, bool block)
  ****************************************************************************/
 
 int iob_clone_partial(FAR struct iob_s *iob1, unsigned int len,
-                      unsigned int offset1, FAR struct iob_s *iob2,
-                      unsigned int offset2, bool throttled, bool block)
+                      int offset1, FAR struct iob_s *iob2,
+                      int offset2, bool throttled, bool block)
 {
   FAR uint8_t *src;
   FAR uint8_t *dest;
@@ -136,7 +129,7 @@ int iob_clone_partial(FAR struct iob_s *iob1, unsigned int len,
    * the list, Skip I/O buffer containing the data offset.
    */
 
-  while (iob1 != NULL && offset1 >= iob1->io_len)
+  while (iob1 != NULL && (int)(offset1 - iob1->io_len) >= 0)
     {
       offset1 -= iob1->io_len;
       iob1     = iob1->io_flink;
@@ -147,7 +140,7 @@ int iob_clone_partial(FAR struct iob_s *iob1, unsigned int len,
   while (iob2 != NULL)
     {
       avail2 = CONFIG_IOB_BUFSIZE - iob2->io_offset;
-      if (offset2 < avail2)
+      if ((int)(offset2 - avail2) < 0)
         {
           break;
         }
@@ -202,7 +195,7 @@ int iob_clone_partial(FAR struct iob_s *iob1, unsigned int len,
 
       /* Have we taken all of the data from the source I/O buffer? */
 
-      if (offset1 >= iob1->io_len)
+      if ((int)(offset1 - iob1->io_len) >= 0)
         {
           /* Skip over empty entries in the chain (there should not be any
            * but just to be safe).
@@ -225,7 +218,7 @@ int iob_clone_partial(FAR struct iob_s *iob1, unsigned int len,
        * transferred?
        */
 
-      if (offset2 >= (CONFIG_IOB_BUFSIZE - iob2->io_offset) &&
+      if ((int)(offset2 + iob2->io_offset - CONFIG_IOB_BUFSIZE) >= 0 &&
           iob1 != NULL)
         {
           ret = iob_next(iob2, throttled, block);

@@ -34,6 +34,7 @@
 
 #include <nuttx/fs/fs.h>
 #include <nuttx/sensors/ioctl.h>
+#include <nuttx/clock.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -289,14 +290,150 @@
 
 #define SENSOR_TYPE_CAP                             32
 
+/* Gas sensor
+ * This sensor measures the gas resistance, indicating the presence
+ * of volatile organic compounds in the air.
+ */
+
+#define SENSOR_TYPE_GAS                             33
+
+/* Force
+ * A sensor of this type measures the force on it, and additionally
+ * compares the force with one or more specified thresholds. The sensor
+ * can output the force value directly. Moreover, it's usually applied
+ * as a press key. In that case, when it detects a force greater than
+ * some given threshold, a corresponding event is reported.
+ */
+
+#define SENSOR_TYPE_FORCE                           34
+
 /* The total number of sensor */
 
-#define SENSOR_TYPE_COUNT                           33
+#define SENSOR_TYPE_COUNT                           35
 
 /* The additional sensor open flags */
 
-#define SENSOR_REMOTE                               (1 << 31)
-#define SENSOR_PERSIST                              (1 << 30)
+#define SENSOR_REMOTE                               (1u << 31)
+#define SENSOR_PERSIST                              (1u << 30)
+
+/* Body coordinate system position P0:
+ *
+ *          +y
+ *          |
+ *          |
+ *          |
+ *          |
+ *          .------>+x
+ *         /
+ *        /
+ *       /
+ *      /
+ *     +z
+ *
+ */
+
+#define SENSOR_BODY_COORDINATE_P0                   0
+
+/* Body coordinate system position P1:
+ *
+ *          .------>+y
+ *         /|
+ *        / |
+ *       /  |
+ *      /   |
+ *     +z  -x
+ *
+ */
+
+#define SENSOR_BODY_COORDINATE_P1                   1
+
+/* Body coordinate system position P2:
+ *
+ * -x<------.
+ *         /|
+ *        / |
+ *       /  |
+ *      /   |
+ *     +z  -y
+ *
+ */
+
+#define SENSOR_BODY_COORDINATE_P2                   2
+
+/* Body coordinate system position P3:
+ *
+ *          +x
+ *          |
+ *          |
+ *          |
+ *          |
+ * -y<------.
+ *         /
+ *        /
+ *       /
+ *      /
+ *     +z
+ *
+ */
+
+#define SENSOR_BODY_COORDINATE_P3                   3
+
+/* Body coordinate system position P4:
+ *
+ *          +y  -z
+ *          |   /
+ *          |  /
+ *          | /
+ *          |/
+ * -x<------.
+ *
+ */
+
+#define SENSOR_BODY_COORDINATE_P4                   4
+
+/* Body coordinate system position P5:
+ *
+ *          +y  -z
+ *          |   /
+ *          |  /
+ *          | /
+ *          |/
+ * -x<------.
+ *
+ */
+
+#define SENSOR_BODY_COORDINATE_P5                   5
+
+/* Body coordinate system position P6:
+ *
+ *              -z
+ *              /
+ *             /
+ *            /
+ *           /
+ * -x<------.
+ *          |
+ *          |
+ *          |
+ *          |
+ *         -y
+ *
+ */
+
+#define SENSOR_BODY_COORDINATE_P6                   6
+
+/* Body coordinate system position P7:
+ *
+ *         +x   -z
+ *          |   /
+ *          |  /
+ *          | /
+ *          |/
+ *          .------->y
+ *
+ */
+
+#define SENSOR_BODY_COORDINATE_P7                   7
 
 /****************************************************************************
  * Inline Functions
@@ -344,6 +481,7 @@ struct sensor_mag           /* Type: Magnetic Field */
   float y;                  /* Axis Y in Gauss or micro Tesla (uT) */
   float z;                  /* Axis Z in Gauss or micro Tesla (uT) */
   float temperature;        /* Temperature in degrees celsius */
+  int32_t status;           /* Status of calibration */
 };
 
 struct sensor_baro          /* Type: Barometer */
@@ -363,6 +501,7 @@ struct sensor_light         /* Type: Light */
 {
   uint64_t timestamp;       /* Units is microseconds */
   float light;              /* in SI lux units */
+  float ir;                 /* in SI lux units */
 };
 
 struct sensor_humi          /* Type: Relative Humidity */
@@ -388,7 +527,7 @@ struct sensor_rgb           /* Type: RGB */
 struct sensor_hall          /* Type: HALL */
 {
   uint64_t timestamp;       /* Units is microseconds */
-  bool hall;                /* Boolean type */
+  int32_t hall;             /* Hall state */
 };
 
 struct sensor_ir            /* Type: Infrared Ray */
@@ -417,6 +556,7 @@ struct sensor_gps           /* Type: Gps */
   float epv;                /* GPS vertical position accuracy (metres) */
 
   float hdop;               /* Horizontal dilution of precision */
+  float pdop;               /* Position dilution of precision */
   float vdop;               /* Vertical dilution of precision */
 
   float ground_speed;       /* GPS ground speed, Unit is m/s */
@@ -584,6 +724,19 @@ struct sensor_cap           /* Type: Capacitance */
   uint64_t timestamp;       /* Unit is microseconds */
   int32_t status;           /* Detection status */
   int32_t rawdata[4];       /* in SI units pF */
+};
+
+struct sensor_gas           /* Type: Gas */
+{
+  uint64_t timestamp;       /* Units is microseconds */
+  float gas_resistance;     /* Gas resistance in kOhm */
+};
+
+struct sensor_force         /* Type: Force */
+{
+  uint64_t timestamp;       /* Unit is microseconds */
+  float force;              /* Force value, units is N */
+  int32_t event;            /* Force event */
 };
 
 /* The sensor lower half driver interface */
@@ -1023,6 +1176,24 @@ extern "C"
 #else
 #define EXTERN extern
 #endif
+
+/****************************************************************************
+ * Name: sensor_remap_vector_raw16
+ *
+ * Description:
+ *   This function remap the sensor data according to the place position on
+ *   board. The value of place is determined base on g_remap_tbl.
+ *
+ * Input Parameters:
+ *   in    - A pointer to input data need remap.
+ *   out   - A pointer to output data.
+ *   place - The place position of sensor on board,
+ *           ex:SENSOR_BODY_COORDINATE_PX
+ *
+ ****************************************************************************/
+
+void sensor_remap_vector_raw16(FAR const int16_t *in, FAR int16_t *out,
+                               int place);
 
 /****************************************************************************
  * "Upper Half" Sensor Driver Interfaces

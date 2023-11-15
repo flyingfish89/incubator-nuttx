@@ -67,7 +67,7 @@ int udp_close(FAR struct socket *psock)
 
   net_lock();
 
-  conn = (FAR struct udp_conn_s *)psock->s_conn;
+  conn = psock->s_conn;
   DEBUGASSERT(conn != NULL);
 
 #ifdef CONFIG_NET_SOLINGER
@@ -85,7 +85,8 @@ int udp_close(FAR struct socket *psock)
 
   if (_SO_GETOPT(conn->sconn.s_options, SO_LINGER))
     {
-      timeout = _SO_TIMEOUT(conn->sconn.s_linger);
+      timeout = (conn->sconn.s_linger == 0) ? 0 :
+                _SO_TIMEOUT(conn->sconn.s_linger);
     }
 #endif
 
@@ -101,6 +102,8 @@ int udp_close(FAR struct socket *psock)
 
       nerr("ERROR: udp_txdrain() failed: %d\n", ret);
     }
+
+  udp_leavegroup(conn);
 
 #ifdef CONFIG_NET_UDP_WRITE_BUFFERS
   /* Free any semi-permanent write buffer callback in place. */

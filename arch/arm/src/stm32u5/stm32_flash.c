@@ -40,6 +40,7 @@
 #include <debug.h>
 #include <errno.h>
 #include <string.h>
+#include <sys/param.h>
 #include <nuttx/mutex.h>
 
 #include "stm32_rcc.h"
@@ -48,6 +49,8 @@
 #include "arm_internal.h"
 
 #if !defined(CONFIG_STM32U5_STM32U585XX)
+#elif !defined(CONFIG_STM32U5_STM32U5A5XX)
+#else
 #  error "Unrecognized STM32 chip"
 #endif
 
@@ -88,10 +91,6 @@
 #define FLASH_NSSR_ALLERRS (FLASH_NSSR_PGSERR | FLASH_NSSR_SIZERR | \
                             FLASH_NSSR_PGAERR | FLASH_NSSR_WRPERR | \
                             FLASH_NSSR_PROGERR)
-
-#ifndef MIN
-#  define MIN(a, b)        ((a) < (b) ? (a) : (b))
-#endif
 
 /****************************************************************************
  * Private Data

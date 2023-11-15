@@ -1,16 +1,37 @@
 /****************************************************************************
- * boards/xtensa/esp32s3/common/scripts/esp32s3_memory.ld
+ * boards/xtensa/esp32s3/common/scripts/flat_memory.ld
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/****************************************************************************
  * ESP32-S3 Linker Script Memory Layout
  *
  * This file describes the memory layout (memory blocks) as virtual
  * memory addresses.
  *
- * esp32s3_sections.ld contains output sections to link compiler output
- * into these memory blocks.
+ * <legacy/mcuboot>_sections.ld contains output sections to link compiler
+ * output into these memory blocks.
  *
  ****************************************************************************/
 
 #include <nuttx/config.h>
+
+#include "esp32s3_aliases.ld"
 
 #define SRAM_IRAM_START     0x40370000
 #define SRAM_DIRAM_I_START  0x40378000
@@ -22,10 +43,15 @@
  * Application Image properly.
  *
  * For more information, refer to the bootloader linker scripts:
- * https://github.com/espressif/esp-idf/blob/v4.4.2/components/bootloader/subproject/main/ld/esp32s3/bootloader.ld#L41-L47
+ * https://github.com/espressif/esp-idf/blob/v5.1/components/bootloader/subproject/main/ld/esp32s3/bootloader.ld#L46-L52
  */
 
+#ifdef CONFIG_ESP32S3_APP_FORMAT_MCUBOOT
+#define SRAM_IRAM_END       0x403ba000
+#else
 #define SRAM_IRAM_END       0x403cc700
+#endif
+
 #define I_D_SRAM_OFFSET     (SRAM_DIRAM_I_START - SRAM_DRAM_START)
 
 #define SRAM_DRAM_START     0x3fc88000
@@ -47,6 +73,8 @@
 #  define FLASH_SIZE        0x800000
 #elif defined (CONFIG_ESP32S3_FLASH_16M)
 #  define FLASH_SIZE        0x1000000
+#elif defined (CONFIG_ESP32S3_FLASH_32M)
+#  define FLASH_SIZE        0x2000000
 #endif
 
 MEMORY

@@ -48,9 +48,10 @@
 
 uint64_t host_gettime(bool rtc)
 {
-  static LARGE_INTEGER start;
-  LARGE_INTEGER counter;
-  LARGE_INTEGER freq;
+  static long long int ticks_per_sec;
+  static uint64_t start;
+  uint64_t current;
+  LARGE_INTEGER now;
   FILETIME ftime;
 
   if (rtc)
@@ -61,17 +62,23 @@ uint64_t host_gettime(bool rtc)
                ftime.dwLowDateTime) - DELTA_EPOCH_IN_100NS) * 100;
     }
 
-  QueryPerformanceFrequency(&freq);
-  QueryPerformanceCounter(&counter);
-
-  counter.QuadPart = counter.QuadPart * POW10_9 / freq.QuadPart;
-
-  if (start.QuadPart == 0)
+  if (ticks_per_sec == 0)
     {
-      start.QuadPart = counter.QuadPart;
+      QueryPerformanceFrequency(&now);
+      InterlockedExchange64(&ticks_per_sec, now.QuadPart);
     }
 
-  return counter.QuadPart - start.QuadPart;
+  QueryPerformanceCounter(&now);
+
+  current = now.QuadPart / ticks_per_sec * POW10_9 +
+            (now.QuadPart % ticks_per_sec) * POW10_9 / ticks_per_sec;
+
+  if (start == 0)
+    {
+      start = current;
+    }
+
+  return current - start;
 }
 
 /****************************************************************************
@@ -120,14 +127,33 @@ void host_sleepuntil(uint64_t nsec)
  *   Set up a timer to send periodic signals.
  *
  * Input Parameters:
- *   irq - a pointer where we save the host signal number for SIGALRM
+ *   nsec - timer expire time
  *
  * Returned Value:
  *   On success, (0) zero value is returned, otherwise a negative value.
  *
  ****************************************************************************/
 
-int host_settimer(int *irq)
+int host_settimer(uint64_t nsec)
 {
   return -ENOSYS;
+}
+
+/****************************************************************************
+ * Name: host_timerirq
+ *
+ * Description:
+ *   Get timer irq
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   On success, irq num returned, otherwise a negative value.
+ *
+ ****************************************************************************/
+
+int host_timerirq(void)
+{
+  return 0;
 }

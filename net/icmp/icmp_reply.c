@@ -133,7 +133,7 @@ void icmp_reply(FAR struct net_driver_s *dev, int type, int code)
 
       /* Skip icmp header from iob */
 
-      iob_update_pktlen(dev->d_iob, datalen + ipicmplen);
+      iob_update_pktlen(dev->d_iob, datalen + ipicmplen, false);
     }
   else
     {
@@ -167,8 +167,9 @@ void icmp_reply(FAR struct net_driver_s *dev, int type, int code)
 
       /* Skip icmp header from iob */
 
-      iob_update_pktlen(dev->d_iob, dev->d_iob->io_pktlen +
-                                    sizeof(struct icmp_hdr_s));
+      iob_update_pktlen(dev->d_iob,
+                        dev->d_iob->io_pktlen + sizeof(struct icmp_hdr_s),
+                        false);
 
       /* Concat new icmp packet before original datagram */
 
@@ -183,7 +184,7 @@ void icmp_reply(FAR struct net_driver_s *dev, int type, int code)
 
   ipv4_build_header(IPv4BUF, dev->d_len, IP_PROTO_ICMP,
                     &dev->d_ipaddr, (FAR in_addr_t *)ipv4->srcipaddr,
-                    IP_TTL_DEFAULT, NULL);
+                    IP_TTL_DEFAULT, 0, NULL);
 
   /* Initialize the ICMP header */
 

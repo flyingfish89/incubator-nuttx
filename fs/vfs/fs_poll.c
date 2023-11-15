@@ -86,34 +86,9 @@ static inline int poll_setup(FAR struct pollfd *fds, nfds_t nfds,
        * spec, that appears to be the correct behavior.
        */
 
-      switch (fds[i].events & POLLMASK)
+      if (fds[i].fd >= 0)
         {
-        case POLLFD:
-          if (fds[i].fd >= 0)
-            {
-              ret = poll_fdsetup(fds[i].fd, &fds[i], true);
-            }
-          break;
-
-        case POLLFILE:
-          if (fds[i].ptr != NULL)
-            {
-              ret = file_poll(fds[i].ptr, &fds[i], true);
-            }
-          break;
-
-#ifdef CONFIG_NET
-        case POLLSOCK:
-          if (fds[i].ptr != NULL)
-            {
-              ret = psock_poll(fds[i].ptr, &fds[i], true);
-            }
-          break;
-#endif
-
-        default:
-          ret = -EINVAL;
-          break;
+          ret = poll_fdsetup(fds[i].fd, &fds[i], true);
         }
 
       if (ret < 0)
@@ -126,25 +101,7 @@ static inline int poll_setup(FAR struct pollfd *fds, nfds_t nfds,
 
           for (j = 0; j < i; j++)
             {
-              switch (fds[j].events & POLLMASK)
-                {
-                case POLLFD:
-                  poll_fdsetup(fds[j].fd, &fds[j], false);
-                  break;
-
-                case POLLFILE:
-                  file_poll(fds[j].ptr, &fds[j], false);
-                  break;
-
-#ifdef CONFIG_NET
-                case POLLSOCK:
-                  psock_poll(fds[j].ptr, &fds[j], false);
-                  break;
-#endif
-
-                default:
-                  break;
-                }
+              poll_fdsetup(fds[j].fd, &fds[j], false);
             }
 
           /* Indicate an error on the file descriptor */
@@ -177,34 +134,9 @@ static inline int poll_teardown(FAR struct pollfd *fds, nfds_t nfds,
   *count = 0;
   for (i = 0; i < nfds; i++)
     {
-      switch (fds[i].events & POLLMASK)
+      if (fds[i].fd >= 0)
         {
-        case POLLFD:
-          if (fds[i].fd >= 0)
-            {
-              status = poll_fdsetup(fds[i].fd, &fds[i], false);
-            }
-          break;
-
-        case POLLFILE:
-          if (fds[i].ptr != NULL)
-            {
-              status = file_poll(fds[i].ptr, &fds[i], false);
-            }
-          break;
-
-#ifdef CONFIG_NET
-        case POLLSOCK:
-            if (fds[i].ptr != NULL)
-            {
-              status = psock_poll(fds[i].ptr, &fds[i], false);
-            }
-          break;
-#endif
-
-        default:
-          status = -EINVAL;
-          break;
+          status = poll_fdsetup(fds[i].fd, &fds[i], false);
         }
 
       if (status < 0)
@@ -332,7 +264,8 @@ void poll_notify(FAR struct pollfd **afds, int nfds, pollevent_t eventset)
               fds->revents &= ~POLLOUT;
             }
 
-          if (fds->revents != 0 && fds->cb != NULL)
+          if ((fds->revents != 0 || (fds->events & POLLALWAYS) != 0) &&
+              fds->cb != NULL)
             {
               finfo("Report events: %08" PRIx32 "\n", fds->revents);
               fds->cb(fds);
@@ -375,7 +308,7 @@ int file_poll(FAR struct file *filep, FAR struct pollfd *fds, bool setup)
        */
 
       if ((INODE_IS_DRIVER(inode) || INODE_IS_MQUEUE(inode) ||
-          INODE_IS_SOCKET(inode)) &&
+          INODE_IS_SOCKET(inode) || INODE_IS_PIPE(inode)) &&
           inode->u.i_ops != NULL && inode->u.i_ops->poll != NULL)
         {
           /* Yes, it does... Setup the poll */
@@ -461,7 +394,7 @@ int poll(FAR struct pollfd *fds, nfds_t nfds, int timeout)
     {
       /* Out of memory */
 
-      ret = ENOMEM;
+      ret = -ENOMEM;
       goto out_with_cancelpt;
     }
 

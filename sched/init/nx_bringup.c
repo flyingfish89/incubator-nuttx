@@ -35,13 +35,14 @@
 #include <nuttx/fs/fs.h>
 #include <nuttx/init.h>
 #include <nuttx/symtab.h>
+#include <nuttx/trace.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/kthread.h>
 #include <nuttx/userspace.h>
 #include <nuttx/binfmt/binfmt.h>
 
 #ifdef CONFIG_PAGING
-# include "paging/paging.h"
+#  include "paging/paging.h"
 #endif
 
 #include "sched/sched.h"
@@ -234,9 +235,7 @@ static inline void nx_start_application(void)
 #  endif
     NULL,
   };
-#endif
 
-#ifdef CONFIG_INIT_FILE
   posix_spawnattr_t attr;
 #endif
   int ret;
@@ -248,6 +247,10 @@ static inline void nx_start_application(void)
 
   board_late_initialize();
 #endif
+
+  posix_spawnattr_init(&attr);
+  attr.priority  = CONFIG_INIT_PRIORITY;
+  attr.stacksize = CONFIG_INIT_STACKSIZE;
 
 #if defined(CONFIG_INIT_ENTRY)
 
@@ -261,16 +264,14 @@ static inline void nx_start_application(void)
 
 #  ifdef CONFIG_BUILD_PROTECTED
   DEBUGASSERT(USERSPACE->us_entrypoint != NULL);
-  ret = nxtask_create(CONFIG_INIT_ENTRYNAME, CONFIG_INIT_PRIORITY,
-                      NULL, CONFIG_INIT_STACKSIZE,
-                      USERSPACE->us_entrypoint, argv, NULL);
+  ret = task_spawn(CONFIG_INIT_ENTRYNAME,
+                   USERSPACE->us_entrypoint,
+                   NULL, &attr, argv, NULL);
 #  else
-  ret = nxtask_create(CONFIG_INIT_ENTRYNAME, CONFIG_INIT_PRIORITY,
-                      NULL, CONFIG_INIT_STACKSIZE,
-                      CONFIG_INIT_ENTRYPOINT, argv, NULL);
+  ret = task_spawn(CONFIG_INIT_ENTRYNAME,
+                   CONFIG_INIT_ENTRYPOINT,
+                   NULL, &attr, argv, NULL);
 #  endif
-  DEBUGASSERT(ret > 0);
-
 #elif defined(CONFIG_INIT_FILE)
 
 #  ifdef CONFIG_INIT_MOUNT
@@ -295,11 +296,10 @@ static inline void nx_start_application(void)
   attr.stacksize = CONFIG_INIT_STACKSIZE;
 
   ret = exec_spawn(CONFIG_INIT_FILEPATH, argv, NULL,
-                   CONFIG_INIT_SYMTAB, CONFIG_INIT_NEXPORTS, &attr);
-  DEBUGASSERT(ret >= 0);
+                   CONFIG_INIT_SYMTAB, CONFIG_INIT_NEXPORTS, NULL, &attr);
 #endif
-
-  UNUSED(ret);
+  posix_spawnattr_destroy(&attr);
+  DEBUGASSERT(ret > 0);
 }
 
 /****************************************************************************
@@ -407,6 +407,8 @@ static inline void nx_create_initthread(void)
 
 int nx_bringup(void)
 {
+  sched_trace_begin();
+
 #ifndef CONFIG_DISABLE_ENVIRON
   /* Setup up the initial environment for the idle task.  At present, this
    * may consist of only the initial PATH variable and/or and init library
@@ -455,5 +457,6 @@ int nx_bringup(void)
   clearenv();
 #endif
 
+  sched_trace_end();
   return OK;
 }

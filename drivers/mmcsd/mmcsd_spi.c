@@ -1088,7 +1088,7 @@ static int mmcsd_open(FAR struct inode *inode)
 
   /* Extract our private data from the inode structure */
 
-  slot = (FAR struct mmcsd_slot_s *)inode->i_private;
+  slot = inode->i_private;
   spi  = slot->spi;
 
 #ifdef CONFIG_DEBUG_FEATURES
@@ -1188,7 +1188,7 @@ static ssize_t mmcsd_read(FAR struct inode *inode, unsigned char *buffer,
 
   /* Extract our private data from the inode structure */
 
-  slot = (FAR struct mmcsd_slot_s *)inode->i_private;
+  slot = inode->i_private;
   spi  = slot->spi;
 
 #ifdef CONFIG_DEBUG_FEATURES
@@ -1371,7 +1371,7 @@ static ssize_t mmcsd_write(FAR struct inode *inode,
 
   /* Extract our private data from the inode structure */
 
-  slot = (FAR struct mmcsd_slot_s *)inode->i_private;
+  slot = inode->i_private;
   spi  = slot->spi;
 
 #ifdef CONFIG_DEBUG_FEATURES
@@ -1575,7 +1575,7 @@ static int mmcsd_geometry(FAR struct inode *inode, struct geometry *geometry)
 
   /* Extract our private data from the inode structure */
 
-  slot = (FAR struct mmcsd_slot_s *)inode->i_private;
+  slot = inode->i_private;
   spi  = slot->spi;
 
 #ifdef CONFIG_DEBUG_FEATURES
@@ -1610,6 +1610,8 @@ static int mmcsd_geometry(FAR struct inode *inode, struct geometry *geometry)
   mmcsd_checkwrprotect(slot, csd);
 
   /* Then return the card geometry */
+
+  memset(geometry, 0, sizeof(*geometry));
 
   geometry->geo_available =
     ((slot->state & (MMCSD_SLOTSTATUS_NOTREADY |
@@ -1732,7 +1734,6 @@ static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
     {
       ferr("ERROR: Send CMD0 failed: R1=%02" PRIx32 "\n", result);
       SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
-      mmcsd_unlock(slot);
       return -EIO;
     }
 
@@ -1863,7 +1864,6 @@ static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
         {
           ferr("ERROR: Failed to exit IDLE state\n");
           SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
-          mmcsd_unlock(slot);
           return -EIO;
         }
     }
@@ -1872,7 +1872,6 @@ static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
     {
       ferr("ERROR: Failed to identify card\n");
       SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
-      mmcsd_unlock(slot);
       return -EIO;
     }
 
@@ -1884,7 +1883,6 @@ static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
     {
       ferr("ERROR: mmcsd_getcsd(CMD9) failed: %" PRId32 "\n", result);
       SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
-      mmcsd_unlock(slot);
       return -EIO;
     }
 

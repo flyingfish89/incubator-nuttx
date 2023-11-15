@@ -79,7 +79,7 @@
  */
 
 #ifndef CONFIG_IEEE802154_NETDEV_NINTERFACES
-# define CONFIG_IEEE802154_NETDEV_NINTERFACES 1
+#  define CONFIG_IEEE802154_NETDEV_NINTERFACES 1
 #endif
 
 /* Preferred address size */
@@ -939,7 +939,7 @@ static int macnet_ioctl(FAR struct net_driver_s *dev, int cmd,
                   /* Save the notification events */
 
                   priv->md_notify_event       = netmac->u.event;
-                  priv->md_notify_pid         = getpid();
+                  priv->md_notify_pid         = nxsched_getpid();
                   priv->md_notify_registered  = true;
                   ret = OK;
                 }

@@ -1,6 +1,6 @@
-=======
-i.MX RT
-=======
+===========
+NXP i.MX RT
+===========
 
 The i.MX RT series of chips from NXP Semiconductors is based around an ARM Cortex-M7 core running
 at 500 MHz, 600 MHz or 1 GHz based on particular MCUs
@@ -87,9 +87,9 @@ ADC
 ADC driver with the successive approximation analog/digital converter. The lower-half of
 this driver is initialize by calling :c:func:`imxrt_adcinitialize`.
 
-ADC module can use either continous trigger (next conversion is started as soon as the
+ADC module can use either continuous trigger (next conversion is started as soon as the
 previous is finished) or hardware trigger. This option is selected by IMXRT_ADCx_ETC
-(x = 1, 2) config option. If IMXRT_ADCx_ETC = -1 then continous trigger is used. If
+(x = 1, 2) config option. If IMXRT_ADCx_ETC = -1 then continuous trigger is used. If
 corresponding XBAR number is put in IMXRT_ADCx_ETC then that signal is used to trigger
 the ADC conversion (for example PWM signal can be used as a source). For PWM XBAR options
 please refer to PWM chapter of this documentation.
@@ -181,7 +181,7 @@ Output on pin B is currently supported only as a complementary option to pin A.
 The lower-half of this driver is initialize by calling :c:func:`imxrt_pwminitialize`.
 
 PWM module can be synchronized by an external signal. The external signal used for synchronization
-is selected by IMXRT_FLEXPWMx_MODx_SYNC_SRC config option. The number in IMXRT_FLEXPWM4_MOD4_SYNC_SRC
+is selected by IMXRT_FLEXPWMx_MODx_SYNC_SRC config option. The number in IMXRT_FLEXPWMx_MODx_SYNC_SRC
 corresponds with the XBAR number. Following numbers can be used for synchronization of PWMs with other
 PWM module when using iMXRT1020, iMXRT1050 or iMXRT1060.
 
@@ -220,6 +220,9 @@ iMXRT1170 has different XBAR connections:
 - PWM4 Module 2 = 87
 - PWM4 Module 3 = 88
 - PWM4 Module 4 = 89
+
+Option IMXRT_FLEXPWMx_MODx_TRIG allows the module to generate a trigger signal. The trigger is generated on
+timer capture of either period or duty cycle value based on the configuration.
 
 SAI
 ---

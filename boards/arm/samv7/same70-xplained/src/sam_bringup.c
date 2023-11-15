@@ -25,6 +25,7 @@
 #include <nuttx/config.h>
 
 #include <sys/mount.h>
+#include <sys/param.h>
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -36,6 +37,7 @@
 #  include <nuttx/usb/usbmonitor.h>
 #endif
 
+#include <nuttx/signal.h>
 #include <nuttx/drivers/drivers.h>
 #include <nuttx/drivers/ramdisk.h>
 #include <nuttx/fs/fs.h>
@@ -64,8 +66,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-#define ARRAY_SIZE(x)   (sizeof(x) / sizeof((x)[0]))
 
 #define NSECTORS(n) \
   (((n)+CONFIG_SAME70XPLAINED_ROMFS_ROMDISK_SECTSIZE-1) / \
@@ -96,7 +96,7 @@ static struct mtd_partition_s g_mtd_partition_table[] =
 };
 
 static const size_t g_mtd_partition_table_size =
-    ARRAY_SIZE(g_mtd_partition_table);
+    nitems(g_mtd_partition_table);
 #else
 #  define g_mtd_partition_table         NULL
 #  define g_mtd_partition_table_size    0
@@ -222,7 +222,7 @@ int sam_bringup(void)
   /* Initialize the HSMCI0 driver */
 
   ret = sam_hsmci_initialize(HSMCI0_SLOTNO, HSMCI0_MINOR, GPIO_HSMCI0_CD,
-                             IRQ_HSMCI0_CD);
+                             IRQ_HSMCI0_CD, true);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: sam_hsmci_initialize(%d,%d) failed: %d\n",
@@ -234,7 +234,7 @@ int sam_bringup(void)
     {
       if (sam_cardinserted(HSMCI0_SLOTNO))
         {
-          usleep(1000 * 1000);
+          nxsig_usleep(1000 * 1000);
 
           /* Mount the volume on HSMCI0 */
 

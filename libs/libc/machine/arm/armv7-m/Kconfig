@@ -5,6 +5,18 @@
 
 if ARCH_ARMV7M
 
+config ARMV7M_STRING_FUNCTION
+	bool "Enable optimized ARMv7M specific string function"
+	default n
+	depends on ARCH_TOOLCHAIN_GNU
+	select ARMV7M_MEMCHR
+	select ARMV7M_MEMCPY
+	select ARMV7M_MEMSET
+	select ARMV7M_MEMMOVE
+	select ARMV7M_STRCMP
+	select ARMV7M_STRCPY
+	select ARMV7M_STRLEN
+
 config ARMV7M_MEMCHR
 	bool "Enable optimized memchr() for ARMv7-M"
 	default n
@@ -45,6 +57,14 @@ config ARMV7M_STRCMP
 	---help---
 		Enable optimized ARMv7-M specific strcmp() library function
 
+config ARMV7M_STRCPY
+	bool "Enable optimized strcpy() for ARMv7-M"
+	default n
+	select LIBC_ARCH_STRCPY
+	depends on ARCH_TOOLCHAIN_GNU
+	---help---
+		Enable optimized ARMv7-M specific strcpy() library function
+
 config ARMV7M_STRLEN
 	bool "Enable optimized strlen() for ARMv7-M"
 	default n
@@ -52,24 +72,5 @@ config ARMV7M_STRLEN
 	depends on ARCH_TOOLCHAIN_GNU
 	---help---
 		Enable optimized ARMv7-M specific strlen() library function
-
-config ARMV7M_LIBM
-	bool "Architecture specific FPU optimizations"
-	default n
-	select LIBM_ARCH_FABSF
-	select LIBM_ARCH_SQRTF
-	depends on ARCH_FPU
-	depends on LIBM
-	---help---
-		Enable ARMv7E-M specific floating point optimizations
-		for fabsf() and fsqrtf()
-
-config LIBM_ARCH_FABSF
-	bool
-	default n
-
-config LIBM_ARCH_SQRTF
-	bool
-	default n
 
 endif

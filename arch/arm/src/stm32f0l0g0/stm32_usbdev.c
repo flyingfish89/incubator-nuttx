@@ -29,6 +29,7 @@
 
 #include <nuttx/config.h>
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -88,7 +89,6 @@
  * endpoint register sets there are.
  */
 
-#define STM32_NENDPOINTS      (8)
 #define EP0                   (0)
 #define EP1                   (1)
 #define EP2                   (2)
@@ -216,16 +216,6 @@
 #define STM32_TRACEINTID_WKUP               0x001d
 #define STM32_TRACEINTID_EP0SETUPOUT        0x001e
 #define STM32_TRACEINTID_EP0SETUPOUTDATA    0x001f
-
-/* Ever-present MIN and MAX macros */
-
-#ifndef MIN
-#  define MIN(a,b) (((a) < (b)) ? (a) : (b))
-#endif
-
-#ifndef MAX
-#  define MAX(a,b) (((a) > (b)) ? (a) : (b))
-#endif
 
 /* Byte ordering in host-based values */
 
@@ -363,9 +353,9 @@ static uint16_t stm32_getreg(uint32_t addr);
 static void stm32_putreg(uint16_t val, uint32_t addr);
 static void stm32_dumpep(int epno);
 #else
-# define stm32_getreg(addr)      getreg16(addr)
-# define stm32_putreg(val,addr)  putreg16(val,addr)
-# define stm32_dumpep(epno)
+#  define stm32_getreg(addr)     getreg16(addr)
+#  define stm32_putreg(val,addr) putreg16(val,addr)
+#  define stm32_dumpep(epno)
 #endif
 
 /* Low-Level Helpers ********************************************************/
@@ -2931,7 +2921,7 @@ static struct usbdev_req_s *stm32_epallocreq(struct usbdev_ep_s *ep)
 #endif
   usbtrace(TRACE_EPALLOCREQ, USB_EPNO(ep->eplog));
 
-  privreq = (struct stm32_req_s *)kmm_malloc(sizeof(struct stm32_req_s));
+  privreq = kmm_malloc(sizeof(struct stm32_req_s));
   if (!privreq)
     {
       usbtrace(TRACE_DEVERROR(STM32_TRACEERR_ALLOCFAIL), 0);

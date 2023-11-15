@@ -50,11 +50,13 @@ struct note_driver_ops_s
 #ifdef CONFIG_SCHED_INSTRUMENTATION_SWITCH
   CODE void (*suspend)(FAR struct note_driver_s *drv, FAR struct tcb_s *tcb);
   CODE void (*resume)(FAR struct note_driver_s *drv, FAR struct tcb_s *tcb);
-#  ifdef CONFIG_SMP
+#endif
+#ifdef CONFIG_SMP
   CODE void (*cpu_start)(FAR struct note_driver_s *drv,
                          FAR struct tcb_s *tcb, int cpu);
   CODE void (*cpu_started)(FAR struct note_driver_s *drv,
                            FAR struct tcb_s *tcb);
+#  ifdef CONFIG_SCHED_INSTRUMENTATION_SWITCH
   CODE void (*cpu_pause)(FAR struct note_driver_s *drv,
                          FAR struct tcb_s *tcb, int cpu);
   CODE void (*cpu_paused)(FAR struct note_driver_s *drv,
@@ -90,13 +92,12 @@ struct note_driver_ops_s
 #ifdef CONFIG_SCHED_INSTRUMENTATION_DUMP
   CODE void (*string)(FAR struct note_driver_s *drv, uintptr_t ip,
                       FAR const char *buf);
-  CODE void (*dump)(FAR struct note_driver_s *drv, uintptr_t ip,
-                    uint8_t event, FAR const void *buf, size_t len);
+  CODE void (*event)(FAR struct note_driver_s *drv, uintptr_t ip,
+                     uint8_t event, FAR const void *buf, size_t len);
   CODE void (*vprintf)(FAR struct note_driver_s *drv, uintptr_t ip,
                        FAR const char *fmt, va_list va) printf_like(3, 0);
   CODE void (*vbprintf)(FAR struct note_driver_s *drv, uintptr_t ip,
-                        uint8_t event, FAR const char *fmt,
-                        va_list va) printf_like(4, 0);
+                        FAR const char *fmt, va_list va) printf_like(3, 0);
 #endif
 };
 
@@ -126,13 +127,14 @@ struct note_driver_s
  *
  ****************************************************************************/
 
-#ifdef CONFIG_DRIVER_NOTE
+#ifdef CONFIG_DRIVERS_NOTE
 int note_initialize(void);
 #endif
 
 #endif /* defined(__KERNEL__) || defined(CONFIG_BUILD_FLAT) */
 
-#if CONFIG_DRIVER_NOTE_TASKNAME_BUFSIZE > 0
+#if defined(CONFIG_DRIVERS_NOTE_TASKNAME_BUFSIZE) && \
+    CONFIG_DRIVERS_NOTE_TASKNAME_BUFSIZE > 0
 
 /****************************************************************************
  * Name: note_get_taskname
@@ -142,17 +144,17 @@ int note_initialize(void);
  *
  * Input Parameters:
  *   PID - Task ID
- *   name - Task name buffer
- *          this buffer must be greater than CONFIG_TASK_NAME_SIZE + 1
  *
  * Returned Value:
- *   Retrun OK if task name can be retrieved, otherwise -ESRCH
+ *   Retrun name if task name can be retrieved, otherwise NULL
  *
  ****************************************************************************/
 
-int note_get_taskname(pid_t pid, FAR char *name);
+FAR const char *note_get_taskname(pid_t pid);
 
-#endif /* CONFIG_DRIVER_NOTE_TASKNAME_BUFSIZE > 0 */
+#endif /* defined(CONFIG_DRIVERS_NOTE_TASKNAME_BUFSIZE) && \
+        * CONFIG_DRIVERS_NOTE_TASKNAME_BUFSIZE > 0
+        */
 
 /****************************************************************************
  * Name: note_driver_register

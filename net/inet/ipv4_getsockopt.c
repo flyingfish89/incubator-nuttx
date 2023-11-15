@@ -84,6 +84,16 @@ int ipv4_getsockopt(FAR struct socket *psock, int option,
         break;
 #endif
 
+      case IP_TOS:
+        {
+          FAR struct socket_conn_s *conn = psock->s_conn;
+
+          *(FAR uint8_t *)value = conn->s_tos;
+          *value_len = 1;
+          ret = OK;
+        }
+        break;
+
       default:
         nerr("ERROR: Unrecognized IPv4 option: %d\n", option);
         ret = -ENOPROTOOPT;

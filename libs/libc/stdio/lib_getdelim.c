@@ -32,20 +32,6 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Some environments may return CR as end-of-line, others LF, and others
- * both.  Because of the definition of the getline() function, it can handle
- * only single character line terminators.
- */
-
-#undef HAVE_GETLINE
-#if defined(CONFIG_EOL_IS_CR)
-#  define HAVE_GETLINE 1
-#  define EOLCH        '\r'
-#elif defined(CONFIG_EOL_IS_LF)
-#  define HAVE_GETLINE 1
-#  define EOLCH        '\n'
-#endif
-
 #define BUFSIZE_INIT   64
 #define BUFSIZE_INCR   32
 
@@ -135,7 +121,7 @@ ssize_t getdelim(FAR char **lineptr, size_t *n, int delimiter,
   dest = *lineptr;
   if (dest == NULL)
     {
-      dest = (FAR char *)lib_malloc(bufsize);
+      dest = lib_malloc(bufsize);
       if (dest == NULL)
         {
           ret = ENOMEM;
@@ -170,7 +156,7 @@ ssize_t getdelim(FAR char **lineptr, size_t *n, int delimiter,
            */
 
           bufsize  += BUFSIZE_INCR;
-          newbuffer = (FAR char *)lib_realloc(*lineptr, bufsize);
+          newbuffer = lib_realloc(*lineptr, bufsize);
           if (newbuffer == NULL)
             {
               ret = ENOMEM;
@@ -219,7 +205,7 @@ errout:
 }
 
 /****************************************************************************
- * Name: getdelim()
+ * Name: getline()
  *
  * Description:
  *   The getline() function will be equivalent to the getdelim() function
@@ -232,9 +218,7 @@ errout:
  *
  ****************************************************************************/
 
-#ifdef HAVE_GETLINE
 ssize_t getline(FAR char **lineptr, size_t *n, FAR FILE *stream)
 {
-  return getdelim(lineptr, n, EOLCH, stream);
+  return getdelim(lineptr, n, '\n', stream);
 }
-#endif

@@ -44,9 +44,9 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define MAX_BUFFER  (8192)
-#define MAX_EXPAND  (2048)
-#define MAX_SHQUOTE (3072)
+#define MAX_BUFFER  (16384)
+#define MAX_EXPAND  (16384)
+#define MAX_SHQUOTE (16384)
 
 /* MAX_PATH might be defined in stdlib.h */
 
@@ -212,7 +212,7 @@ static void append(char **base, const char *str)
     {
       alloclen = strlen(oldbase) + strlen(str) +
         sizeof((char) ' ') + sizeof((char) '\0');
-      newbase = (char *)malloc(alloclen);
+      newbase = malloc(alloclen);
       if (!newbase)
         {
           fprintf(stderr, "ERROR: Failed to allocate %d bytes\n", alloclen);

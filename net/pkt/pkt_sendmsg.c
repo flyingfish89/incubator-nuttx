@@ -105,10 +105,12 @@ static uint16_t psock_send_eventhandler(FAR struct net_driver_s *dev,
         {
           /* Copy the packet data into the device packet buffer and send it */
 
-          devif_pkt_send(dev, pstate->snd_buffer, pstate->snd_buflen);
-          if (dev->d_sndlen == 0)
+          int ret = devif_send(dev, pstate->snd_buffer,
+                               pstate->snd_buflen, 0);
+          if (ret <= 0)
             {
-              return flags;
+              pstate->snd_sent = ret;
+              goto end_wait;
             }
 
           pstate->snd_sent = pstate->snd_buflen;
@@ -119,6 +121,8 @@ static uint16_t psock_send_eventhandler(FAR struct net_driver_s *dev,
 
           IFF_SET_NOARP(dev->d_flags);
         }
+
+end_wait:
 
       /* Don't allow any further call backs. */
 
@@ -201,7 +205,7 @@ ssize_t pkt_sendmsg(FAR struct socket *psock, FAR struct msghdr *msg,
 
   /* Get the device driver that will service this transfer */
 
-  dev = pkt_find_device((FAR struct pkt_conn_s *)psock->s_conn);
+  dev = pkt_find_device(psock->s_conn);
   if (dev == NULL)
     {
       return -ENODEV;
@@ -223,7 +227,7 @@ ssize_t pkt_sendmsg(FAR struct socket *psock, FAR struct msghdr *msg,
 
   if (len > 0)
     {
-      FAR struct pkt_conn_s *conn = (FAR struct pkt_conn_s *)psock->s_conn;
+      FAR struct pkt_conn_s *conn = psock->s_conn;
 
       /* Allocate resource to receive a callback */
 
@@ -241,10 +245,10 @@ ssize_t pkt_sendmsg(FAR struct socket *psock, FAR struct msghdr *msg,
           netdev_txnotify_dev(dev);
 
           /* Wait for the send to complete or an error to occur.
-           * net_lockedwait will also terminate if a signal is received.
+           * net_sem_wait will also terminate if a signal is received.
            */
 
-          ret = net_lockedwait(&state.snd_sem);
+          ret = net_sem_wait(&state.snd_sem);
 
           /* Make sure that no further events are processed */
 
@@ -264,8 +268,8 @@ ssize_t pkt_sendmsg(FAR struct socket *psock, FAR struct msghdr *msg,
       return state.snd_sent;
     }
 
-  /* If net_lockedwait failed, then we were probably reawakened by a signal.
-   * In this case, net_lockedwait will have returned negated errno
+  /* If net_sem_wait failed, then we were probably reawakened by a signal.
+   * In this case, net_sem_wait will have returned negated errno
    * appropriately.
    */
 

@@ -32,6 +32,7 @@
 
 #include <sys/queue.h>
 #include <crypto/cryptodev.h>
+#include <crypto/xform.h>
 
 /* Software session entry */
 
@@ -46,6 +47,7 @@ struct swcr_data
         FAR uint8_t *octx;
         uint32_t klen;
         FAR const struct auth_hash *axf;
+        union authctx ctx;
       } SWCR_AUTH;
 
       struct
@@ -65,6 +67,7 @@ struct swcr_data
 #define sw_octx   SWCR_UN.SWCR_AUTH.octx
 #define sw_klen   SWCR_UN.SWCR_AUTH.klen
 #define sw_axf    SWCR_UN.SWCR_AUTH.axf
+#define sw_ctx    SWCR_UN.SWCR_AUTH.ctx
 #define sw_kschedule SWCR_UN.SWCR_ENC.kschedule
 #define sw_exf    SWCR_UN.SWCR_ENC.exf
 #define sw_size   SWCR_UN.SWCR_COMP.size
@@ -80,7 +83,9 @@ int swcr_authcompute(FAR struct cryptop *, FAR struct cryptodesc *,
 int swcr_authenc(FAR struct cryptop *);
 int swcr_compdec(FAR struct cryptodesc *, FAR struct swcr_data *,
                  caddr_t, int);
+int swcr_rsa_verify(FAR struct cryptkop *);
 int swcr_process(FAR struct cryptop *);
+int swcr_kprocess(FAR struct cryptkop *);
 int swcr_newsession(FAR uint32_t *, FAR struct cryptoini *);
 int swcr_freesession(uint64_t);
 void swcr_init(void);

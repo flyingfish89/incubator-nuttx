@@ -45,6 +45,7 @@
 #endif
 
 #ifdef CONFIG_BOARDCTL_USBDEVCTRL
+#  include <nuttx/usb/adb.h>
 #  include <nuttx/usb/cdcacm.h>
 #  include <nuttx/usb/pl2303.h>
 #  include <nuttx/usb/usbmsc.h>
@@ -88,6 +89,39 @@ static inline int
 
   switch (ctrl->usbdev)
     {
+#if defined(CONFIG_USBADB) && !defined(CONFIG_USBADB_COMPOSITE)
+      case BOARDIOC_USBDEV_ADB:              /* ADB class */
+        switch (ctrl->action)
+          {
+            case BOARDIOC_USBDEV_INITIALIZE: /* Initialize ADB device */
+              break;
+
+            case BOARDIOC_USBDEV_CONNECT:    /* Connect the ADB device */
+              {
+                DEBUGASSERT(ctrl->handle != NULL);
+
+                *ctrl->handle = usbdev_adb_initialize();
+                if (*ctrl->handle == NULL)
+                  {
+                    ret = -EIO;
+                  }
+              }
+              break;
+
+            case BOARDIOC_USBDEV_DISCONNECT: /* Disconnect the ADB device */
+              {
+                DEBUGASSERT(ctrl->handle != NULL && *ctrl->handle != NULL);
+                usbdev_adb_uninitialize(*ctrl->handle);
+              }
+              break;
+
+            default:
+              ret = -EINVAL;
+              break;
+          }
+        break;
+#endif
+
 #ifdef CONFIG_CDCACM
       case BOARDIOC_USBDEV_CDCACM:           /* CDC/ACM, not in a composite */
         switch (ctrl->action)
@@ -560,7 +594,7 @@ int boardctl(unsigned int cmd, uintptr_t arg)
       /* CMD:           BOARDIOC_OS_SYMTAB
        * DESCRIPTION:   Select the OS symbol table.  This symbol table
        *                provides the symbol definitions exported by the OS to
-       *                kernal modules.
+       *                kernel modules.
        * ARG:           A pointer to an instance of struct boardioc_symtab_s
        * CONFIGURATION: CONFIG_BOARDCTL_OS_SYMTAB
        * DEPENDENCIES:  None

@@ -69,6 +69,7 @@
 #define IMGSENSOR_ID_ISO_SENSITIVITY      (0x0001000d)
 #define IMGSENSOR_ID_ISO_SENSITIVITY_AUTO (0x0001000e)
 #define IMGSENSOR_ID_EXPOSURE_METERING    (0x0001000f)
+#define IMGSENSOR_ID_SPOT_POSITION        (0x00010016)
 #define IMGSENSOR_ID_3A_LOCK              (0x00010011)
 #define IMGSENSOR_ID_AUTO_FOCUS_START     (0x00010012)
 #define IMGSENSOR_ID_AUTO_FOCUS_STOP      (0x00010013)
@@ -120,6 +121,36 @@
 #define IMGSENSOR_PIX_FMT_SUBIMG_RGB565    (5)
 #define IMGSENSOR_PIX_FMT_YUYV             (6)
 #define IMGSENSOR_PIX_FMT_YUV420P          (7)
+#define IMGSENSOR_PIX_FMT_NV12             (8)
+
+/* Method access helper macros */
+
+#define IMGSENSOR_IS_AVAILABLE(s) \
+  ((s)->ops->is_available ? (s)->ops->is_available(s) : false)
+#define IMGSENSOR_INIT(s) \
+  ((s)->ops->init ? (s)->ops->init(s) : -ENOTTY)
+#define IMGSENSOR_UNINIT(s) \
+  ((s)->ops->uninit ? (s)->ops->uninit(s) : -ENOTTY)
+#define IMGSENSOR_GET_DRIVER_NAME(s) \
+  ((s)->ops->get_driver_name ? (s)->ops->get_driver_name(s) : NULL)
+#define IMGSENSOR_VALIDATE_FRAME_SETTING(s, t, n, f, i) \
+  ((s)->ops->validate_frame_setting ? \
+   (s)->ops->validate_frame_setting(s, t, n, f, i) : -ENOTTY)
+#define IMGSENSOR_START_CAPTURE(s, t, n, f, i) \
+  ((s)->ops->start_capture ? \
+   (s)->ops->start_capture(s, t, n, f, i) : -ENOTTY)
+#define IMGSENSOR_STOP_CAPTURE(s, t) \
+  ((s)->ops->stop_capture ? (s)->ops->stop_capture(s, t) : -ENOTTY)
+#define IMGSENSOR_GET_FRAME_INTERVAL(s, t, i) \
+  ((s)->ops->get_frame_interval ? \
+   (s)->ops->get_frame_interval(s, t, i) : -ENOTTY)
+#define IMGSENSOR_GET_SUPPORTED_VALUE(s, i, v) \
+  ((s)->ops->get_supported_value ? \
+   (s)->ops->get_supported_value(s, i, v) : -ENOTTY)
+#define IMGSENSOR_GET_VALUE(s, i, l, v) \
+  ((s)->ops->get_value ? (s)->ops->get_value(s, i, l, v) : -ENOTTY)
+#define IMGSENSOR_SET_VALUE(s, i, l, v) \
+  ((s)->ops->set_value ? (s)->ops->set_value(s, i, l, v) : -ENOTTY)
 
 /****************************************************************************
  * Public Types
@@ -265,7 +296,7 @@ typedef struct imgsensor_capability_range_s
 typedef struct imgsensor_capability_discrete_s
 {
   int8_t  nr_values;
-  int32_t *values;
+  FAR const int32_t *values;
   int32_t default_value;
 } imgsensor_capability_discrete_t;
 
@@ -321,31 +352,47 @@ typedef union imgsensor_value_u
 
 /* Structure for Image Sensor I/F */
 
+struct imgsensor_s;
 struct imgsensor_ops_s
 {
-  CODE bool (*is_available)(void);
-  CODE int  (*init)(void);
-  CODE int  (*uninit)(void);
-  CODE const char * (*get_driver_name)(void);
-  CODE int  (*validate_frame_setting)(imgsensor_stream_type_t type,
+  CODE bool (*is_available)(FAR struct imgsensor_s *sensor);
+  CODE int  (*init)(FAR struct imgsensor_s *sensor);
+  CODE int  (*uninit)(FAR struct imgsensor_s *sensor);
+  CODE const char * (*get_driver_name)(FAR struct imgsensor_s *sensor);
+  CODE int  (*validate_frame_setting)(FAR struct imgsensor_s *sensor,
+                                      imgsensor_stream_type_t type,
                                       uint8_t nr_datafmts,
                                       FAR imgsensor_format_t *datafmts,
                                       FAR imgsensor_interval_t *interval);
-  CODE int  (*start_capture)(imgsensor_stream_type_t type,
+  CODE int  (*start_capture)(FAR struct imgsensor_s *sensor,
+                             imgsensor_stream_type_t type,
                              uint8_t nr_datafmts,
                              FAR imgsensor_format_t *datafmts,
                              FAR imgsensor_interval_t *interval);
-  CODE int  (*stop_capture)(imgsensor_stream_type_t type);
-  CODE int  (*get_frame_interval)(imgsensor_stream_type_t type,
+  CODE int  (*stop_capture)(FAR struct imgsensor_s *sensor,
+                            imgsensor_stream_type_t type);
+  CODE int  (*get_frame_interval)(FAR struct imgsensor_s *sensor,
+                                  imgsensor_stream_type_t type,
                                   FAR imgsensor_interval_t *interval);
-  CODE int  (*get_supported_value)(uint32_t id,
+  CODE int  (*get_supported_value)(FAR struct imgsensor_s *sensor,
+                                   uint32_t id,
                                    FAR imgsensor_supported_value_t *value);
-  CODE int  (*get_value)(uint32_t id,
-                         uint32_t size,
+  CODE int  (*get_value)(FAR struct imgsensor_s *sensor,
+                         uint32_t id, uint32_t size,
                          FAR imgsensor_value_t *value);
-  CODE int  (*set_value)(uint32_t id,
-                         uint32_t size,
+  CODE int  (*set_value)(FAR struct imgsensor_s *sensor,
+                         uint32_t id, uint32_t size,
                          imgsensor_value_t value);
+};
+
+/* Image sensor private data.  This structure only defines the initial fields
+ * of the structure visible to the client.  The specific implementation may
+ * add additional, device specific fields after the vtable.
+ */
+
+struct imgsensor_s
+{
+  FAR const struct imgsensor_ops_s *ops;
 };
 
 #ifdef __cplusplus
@@ -362,7 +409,7 @@ extern "C"
 
 /* Register image sensor operations. */
 
-int imgsensor_register(FAR const struct imgsensor_ops_s *ops);
+int imgsensor_register(FAR struct imgsensor_s *sensor);
 
 #undef EXTERN
 #ifdef __cplusplus

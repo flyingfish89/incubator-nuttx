@@ -26,6 +26,7 @@
 
 #ifdef CONFIG_ESP32_SPI
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -108,10 +109,6 @@
 
 #define SPI_DMA_RESET_MASK (SPI_AHBM_RST_M | SPI_AHBM_FIFO_RST_M | \
                             SPI_OUT_RST_M | SPI_IN_RST_M)
-
-#ifndef MIN
-#  define MIN(a,b) (((a) < (b)) ? (a) : (b))
-#endif
 
 #define WORDS2BYTES(_priv, _wn)   (_wn * ((_priv)->nbits / 8))
 #define BYTES2WORDS(_priv, _bn)   (_bn / ((_priv)->nbits / 8))
@@ -758,7 +755,7 @@ static void esp32_spislv_rx(struct esp32_spislv_priv_s *priv)
 
   if (recv_n < priv->rxlen)
     {
-      /** If upper layer does not receive all data of receive
+      /* If upper layer does not receive all data of receive
        *  buffer, move the rest data to head of the buffer
        */
 
@@ -830,20 +827,18 @@ static int esp32_spislv_interrupt(int irq, void *context, void *arg)
 
   n = (esp32_spi_get_reg(priv, SPI_SLV_RD_BIT_OFFSET) + 1) / 8;
 
-  esp32_spi_set_regbits(priv, SPI_USER_OFFSET, SPI_USR_MOSI_M);
-
   /* RX process */
 
   if (!priv->dma_chan)
     {
-      /** With DMA, software should copy data from register
+      /* With DMA, software should copy data from register
        *  to receive buffer
        */
 
       for (i = 0; i < n; i += 4)
         {
           tmp = esp32_spi_get_reg(priv, SPI_W0_OFFSET + i);
-          memcpy(priv->rxbuffer + priv->rxlen + i, &tmp, n);
+          memcpy(priv->rxbuffer + priv->rxlen + i, &tmp, 4);
         }
     }
 
@@ -879,6 +874,8 @@ static int esp32_spislv_interrupt(int irq, void *context, void *arg)
     {
       priv->process = false;
       SPIS_DEV_SELECT(priv->dev, false);
+
+      esp32_spi_reset_regbits(priv, SPI_SLAVE_OFFSET, SPI_TRANS_DONE_M);
     }
 
   return 0;
@@ -1051,6 +1048,12 @@ static void esp32_spislv_deinit(struct spi_slave_ctrlr_s *ctrlr)
 
   esp32_gpioirqdisable(ESP32_PIN2IRQ(priv->config->cs_pin));
   esp32_spi_reset_regbits(priv, SPI_SLAVE_OFFSET, SPI_INT_EN_M);
+
+  if (priv->dma_chan)
+    {
+      modifyreg32(DPORT_PERIP_RST_EN_REG, 0, priv->config->dma_rst_bit);
+      modifyreg32(DPORT_PERIP_CLK_EN_REG, priv->config->dma_clk_bit, 0);
+    }
 
   modifyreg32(DPORT_PERIP_RST_EN_REG, 0, priv->config->clk_bit);
   modifyreg32(DPORT_PERIP_CLK_EN_REG, priv->config->clk_bit, 0);

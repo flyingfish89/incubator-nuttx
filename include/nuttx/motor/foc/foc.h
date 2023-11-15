@@ -60,9 +60,10 @@ enum foc_fault_e
   FOC_FAULT_BOARD   = (1 << 3), /* Board-specific fault */
 };
 
-/* Phase current as signed 32-bit integer */
+/* Phase current and BEMF voltage as signed 32-bit integer */
 
 typedef int32_t foc_current_t;
+typedef int32_t foc_voltage_t;
 
 /* Phase duty cycle as unsigned fixed16.
  * We use range [0.0 to 1.0] so this gives us a 16-bit resolution.
@@ -82,8 +83,12 @@ struct foc_cfg_s
 
 struct foc_state_s
 {
+  bool          pwm_off;                       /* PWM switches disabled */
   uint8_t       fault;                         /* Fault state */
   foc_current_t curr[CONFIG_MOTOR_FOC_PHASES]; /* Phase current feedback */
+#ifdef CONFIG_MOTOR_FOC_BEMF_SENSE
+  foc_voltage_t volt[CONFIG_MOTOR_FOC_PHASES]; /* BEMF voltage feedback */
+#endif
 };
 
 /* Input data to the FOC device */
@@ -93,19 +98,39 @@ struct foc_params_s
   foc_duty_t duty[CONFIG_MOTOR_FOC_PHASES]; /* PWM duty cycle for phases */
 };
 
-/* Hardware specific configuration */
+/* Hardware specific informations */
 
-struct foc_hw_config_s
+struct foc_info_hw_s
 {
+  /* PWM configuration */
+
   uint32_t   pwm_dt_ns;   /* PWM dead-time in nano seconds */
   foc_duty_t pwm_max;     /* Maximum PWM duty cycle */
+
+  /* ADC configuration for phase current sampling
+   *
+   * In most cases it will be:
+   *
+   *   iphase_scale = iphase_ratio * adc_to_volt
+   *   adc_to_volt  = adc_ref_volt / adc_val_max
+   *   for shunt sensors iphase_ratio = 1 / (R_shunt * gain)
+   */
+
+  int32_t    iphase_scale;              /* Current phase scale [x100000] */
+  int32_t    iphase_max;                /* Maximum phase curretn [x1000] */
+
+  /* ADC configuration for BEMF sampling */
+
+#ifdef CONFIG_MOTOR_FOC_BEMF_SENSE
+  int32_t    bemf_scale;                /* BEMF sampling scale [x1000] */
+#endif
 };
 
 /* FOC driver info */
 
 struct foc_info_s
 {
-  struct foc_hw_config_s hw_cfg; /* Hardware specific configuration */
+  struct foc_info_hw_s hw_cfg; /* Hardware specific informations  */
 };
 
 /* FOC device upper-half */

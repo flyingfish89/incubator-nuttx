@@ -35,6 +35,7 @@
 
 #include <nuttx/config.h>
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -341,16 +342,6 @@ const struct trace_msg_t g_usb_trace_strings_deverror[] =
 #endif
 
 /* Misc Helper Macros *******************************************************/
-
-/* Ever-present MIN and MAX macros */
-
-#ifndef MIN
-#  define MIN(a,b) (((a) < (b)) ? (a) : (b))
-#endif
-
-#ifndef MAX
-#  define MAX(a,b) (((a) > (b)) ? (a) : (b))
-#endif
 
 /* Byte ordering in host-based values */
 
@@ -3572,7 +3563,7 @@ static struct usbdev_req_s *khci_epallocreq(struct usbdev_ep_s *ep)
 
   usbtrace(TRACE_EPALLOCREQ, USB_EPNO(ep->eplog));
 
-  privreq = (struct khci_req_s *)kmm_malloc(sizeof(struct khci_req_s));
+  privreq = kmm_malloc(sizeof(struct khci_req_s));
   if (!privreq)
     {
       usbtrace(TRACE_DEVERROR(KHCI_TRACEERR_ALLOCFAIL), 0);

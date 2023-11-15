@@ -213,6 +213,23 @@ int dns_query(FAR const char *hostname, FAR union dns_addr_u *addr,
               FAR int *naddr);
 
 /****************************************************************************
+ * Name: dns_is_queryfamily
+ *
+ * Description:
+ *   Determine if the specified address family is available for DNS query.
+ *
+ * Input Parameters:
+ *   family - The address family. AF_INET or AF_INET6 is specified.
+ *
+ * Returned Value:
+ *   Returns true if the address family specified in the family argument
+ *   is available.
+ *
+ ****************************************************************************/
+
+bool dns_is_queryfamily(sa_family_t family);
+
+/****************************************************************************
  * Name: dns_save_answer
  *
  * Description:
@@ -222,6 +239,7 @@ int dns_query(FAR const char *hostname, FAR union dns_addr_u *addr,
  *   hostname - The hostname string to be cached.
  *   addr     - The IP addresses associated with the hostname.
  *   naddr    - The count of the IP addresses.
+ *   ttl      - The TTL of the IP addresses.
  *
  * Returned Value:
  *   None
@@ -230,7 +248,8 @@ int dns_query(FAR const char *hostname, FAR union dns_addr_u *addr,
 
 #if CONFIG_NETDB_DNSCLIENT_ENTRIES > 0
 void dns_save_answer(FAR const char *hostname,
-                     FAR const union dns_addr_u *addr, int naddr);
+                     FAR const union dns_addr_u *addr, int naddr,
+                     uint32_t ttl);
 #endif
 
 /****************************************************************************

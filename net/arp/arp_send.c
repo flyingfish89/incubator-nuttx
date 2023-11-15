@@ -54,11 +54,11 @@ static void arp_send_terminate(FAR struct arp_send_s *state, int result)
 {
   /* Don't allow any further call backs. */
 
-  state->snd_sent         = true;
-  state->snd_result       = (int16_t)result;
-  state->snd_cb->flags    = 0;
-  state->snd_cb->priv     = NULL;
-  state->snd_cb->event    = NULL;
+  state->snd_sent      = true;
+  state->snd_result    = (int16_t)result;
+  state->snd_cb->flags = 0;
+  state->snd_cb->priv  = NULL;
+  state->snd_cb->event = NULL;
 
   /* Wake up the waiting thread */
 
@@ -277,8 +277,8 @@ int arp_send(in_addr_t ipaddr)
 
   nxsem_init(&state.snd_sem, 0, 0); /* Doesn't really fail */
 
-  state.snd_retries   = 0;              /* No retries yet */
-  state.snd_ipaddr    = ipaddr;         /* IP address to query */
+  state.snd_retries = 0;            /* No retries yet */
+  state.snd_ipaddr  = ipaddr;       /* IP address to query */
 
   /* Remember the routing device name */
 
@@ -325,12 +325,12 @@ int arp_send(in_addr_t ipaddr)
       netdev_txnotify_dev(dev);
 
       /* Wait for the send to complete or an error to occur.
-       * net_lockedwait will also terminate if a signal is received.
+       * net_sem_wait will also terminate if a signal is received.
        */
 
       do
         {
-          ret = net_timedwait_uninterruptible(&state.snd_sem,
+          ret = net_sem_timedwait_uninterruptible(&state.snd_sem,
                                               CONFIG_ARP_SEND_DELAYMSEC);
           if (ret == -ETIMEDOUT)
             {
@@ -372,7 +372,9 @@ timeout:
       /* Increment the retry count */
 
       state.snd_retries++;
-      nerr("ERROR: arp_wait failed: %d\n", ret);
+      nerr("ERROR: arp_wait failed: %d, ipaddr: %u.%u.%u.%u\n", ret,
+           ip4_addr1(ipaddr), ip4_addr2(ipaddr),
+           ip4_addr3(ipaddr), ip4_addr4(ipaddr));
     }
 
   nxsem_destroy(&state.snd_sem);

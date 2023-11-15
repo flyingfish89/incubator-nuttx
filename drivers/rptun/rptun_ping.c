@@ -27,20 +27,15 @@
 
 #include <inttypes.h>
 #include <string.h>
+#include <sys/param.h>
+#include <time.h>
+#include <nuttx/signal.h>
 
 #include "rptun.h"
 
 /****************************************************************************
  * Pre-processor definitions
  ****************************************************************************/
-
-#ifndef MIN
-  #define MIN(n,m)                  (((n) < (m)) ? (n) : (m))
-#endif
-
-#ifndef MAX
-  #define MAX(n,m)                  (((n) < (m)) ? (m) : (n))
-#endif
 
 #define RPTUN_PING_EPT_NAME         "rpmsg-ping"
 #define RPTUN_PING_SEND             1
@@ -128,6 +123,19 @@ static int rptun_ping_once(FAR struct rpmsg_endpoint *ept,
   return ret;
 }
 
+static void rptun_ping_logout(FAR const char *s, clock_t value)
+{
+  struct timespec ts;
+
+  perf_convert(value, &ts);
+
+#ifdef CONFIG_SYSTEM_TIME64
+  syslog(LOG_INFO, "%s: s %" PRIu64 ", ns %ld\n", s, ts.tv_sec, ts.tv_nsec);
+#else
+  syslog(LOG_INFO, "%s: s %" PRIu32 ", ns %ld\n", s, ts.tv_sec, ts.tv_nsec);
+#endif
+}
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -135,10 +143,9 @@ static int rptun_ping_once(FAR struct rpmsg_endpoint *ept,
 int rptun_ping(FAR struct rpmsg_endpoint *ept,
                FAR const struct rptun_ping_s *ping)
 {
-  uint32_t min = UINT32_MAX;
-  uint32_t max = 0;
+  clock_t min = ULONG_MAX;
+  clock_t max = 0;
   uint64_t total = 0;
-  struct timespec ts;
   int i;
 
   if (!ept || !ping || ping->times <= 0)
@@ -148,7 +155,7 @@ int rptun_ping(FAR struct rpmsg_endpoint *ept,
 
   for (i = 0; i < ping->times; i++)
     {
-      uint32_t tm = up_perf_gettime();
+      clock_t tm = perf_gettime();
 
       int ret = rptun_ping_once(ept, ping->len, ping->ack);
       if (ret < 0)
@@ -156,25 +163,19 @@ int rptun_ping(FAR struct rpmsg_endpoint *ept,
           return ret;
         }
 
-      tm     = up_perf_gettime() - tm;
+      tm     = perf_gettime() - tm;
       min    = MIN(min, tm);
       max    = MAX(max, tm);
       total += tm;
 
-      usleep(ping->sleep * USEC_PER_MSEC);
+      nxsig_usleep(ping->sleep * USEC_PER_MSEC);
     }
 
-  syslog(LOG_INFO, "current CPU freq: %" PRIu32 ", ping times: %d\n",
-                    up_perf_getfreq(), ping->times);
+  syslog(LOG_INFO, "ping times: %d\n", ping->times);
 
-  up_perf_convert(total / ping->times, &ts);
-  syslog(LOG_INFO, "avg: s %" PRIu32 ", ns %ld\n", ts.tv_sec, ts.tv_nsec);
-
-  up_perf_convert(min, &ts);
-  syslog(LOG_INFO, "min: s %" PRIu32 ", ns %ld\n", ts.tv_sec, ts.tv_nsec);
-
-  up_perf_convert(max, &ts);
-  syslog(LOG_INFO, "max: s %" PRIu32 ", ns %ld\n", ts.tv_sec, ts.tv_nsec);
+  rptun_ping_logout("avg", total / ping->times);
+  rptun_ping_logout("min", min);
+  rptun_ping_logout("max", max);
 
   return 0;
 }

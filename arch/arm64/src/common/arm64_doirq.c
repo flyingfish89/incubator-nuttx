@@ -28,13 +28,14 @@
 #include <assert.h>
 #include <sched.h>
 #include <debug.h>
+
+#include <nuttx/addrenv.h>
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 #include <nuttx/board.h>
 
 #include "task/task.h"
 #include "sched/sched.h"
-#include "group/group.h"
 #include "irq/irq.h"
 #include "arm64_arch.h"
 #include "arm64_internal.h"
@@ -88,8 +89,15 @@ uint64_t *arm64_doirq(int irq, uint64_t * regs)
        * thread at the head of the ready-to-run list.
        */
 
-      group_addrenv(NULL);
+      addrenv_switch(NULL);
 #endif
+
+      /* Record the new "running" task when context switch occurred.
+       * g_running_tasks[] is only used by assertion logic for reporting
+       * crashes.
+       */
+
+      g_running_tasks[this_cpu()] = this_task();
 
       /* Restore the cpu lock */
 
@@ -126,10 +134,6 @@ void up_irqinitialize(void)
   /* Initialize the Generic Interrupt Controller (GIC) for CPU0 */
 
   arm64_gic_initialize();   /* Initialization common to all CPUs */
-
-#ifdef CONFIG_SMP
-  arm64_smp_sgi_init();
-#endif
 
 #ifndef CONFIG_SUPPRESS_INTERRUPTS
 

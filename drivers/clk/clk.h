@@ -29,6 +29,8 @@
 
 #include <stdint.h>
 #include <strings.h>
+#include <sys/param.h>
+#include <nuttx/bits.h>
 
 #ifdef CONFIG_CLK
 
@@ -36,13 +38,11 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define BIT(nr)                     (1ULL << (nr))
 #define MASK(width)                 (BIT(width) - 1)
 #define MULT_ROUND_UP(r, m)         ((r) * (m) + (m) - 1)
 #define DIV_ROUND_UP(n,d)           (((n) + (d) - 1) / (d))
 #define DIV_ROUND_CLOSEST(n, d)     ((((n) < 0) ^ ((d) < 0)) ? \
                                     (((n) - (d)/2)/(d)) : (((n) + (d)/2)/(d)))
-#define MIN(x, y)                   (x < y) ? x : y
 
 /****************************************************************************
  * Inline Functions

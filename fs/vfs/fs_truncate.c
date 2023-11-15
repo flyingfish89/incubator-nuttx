@@ -34,8 +34,6 @@
 
 #include "inode/inode.h"
 
-#ifndef CONFIG_DISABLE_MOUNTPOINT
-
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -59,7 +57,7 @@ int file_truncate(FAR struct file *filep, off_t length)
   if ((filep->f_oflags & O_WROK) == 0)
     {
       fwarn("WARNING: Cannot truncate a file opened read-only\n");
-      return -EBADF;
+      return -EINVAL;
     }
 
   /* Is this inode a registered mountpoint? Does it support the
@@ -192,5 +190,3 @@ errout:
   set_errno(-ret);
   return ERROR;
 }
-
-#endif /* !CONFIG_DISABLE_MOUNTPOINT */

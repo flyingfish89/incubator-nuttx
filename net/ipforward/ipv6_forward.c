@@ -30,6 +30,7 @@
 #include <debug.h>
 
 #include <nuttx/mm/iob.h>
+#include <nuttx/net/ipv6ext.h>
 #include <nuttx/net/net.h>
 #include <nuttx/net/netdev.h>
 #include <nuttx/net/netstats.h>
@@ -103,6 +104,12 @@ static int ipv6_hdrsize(FAR struct ipv6_hdr_s *ipv6)
 #ifdef CONFIG_NET_ICMPv6
     case IP_PROTO_ICMP6:
       return IPv6_HDRLEN + ICMPv6_HDRLEN;
+      break;
+#endif
+
+#ifdef CONFIG_NET_IPFRAG
+    case NEXT_FRAGMENT_EH:
+      return IPv6_HDRLEN + EXTHDR_FRAG_LEN;
       break;
 #endif
 
@@ -457,13 +464,24 @@ errout:
  ****************************************************************************/
 
 #ifdef CONFIG_NET_IPFORWARD_BROADCAST
-int ipv6_forward_callback(FAR struct net_driver_s *fwddev, FAR void *arg)
+static int ipv6_forward_callback(FAR struct net_driver_s *fwddev,
+                                 FAR void *arg)
 {
   FAR struct net_driver_s *dev = (FAR struct net_driver_s *)arg;
   FAR struct ipv6_hdr_s *ipv6;
+  FAR struct iob_s *iob;
   int ret;
 
-  DEBUGASSERT(fwddev != NULL && dev != NULL && dev->d_buf != NULL);
+  DEBUGASSERT(fwddev != NULL);
+
+  /* Only IFF_UP device and non-loopback device need forward packet */
+
+  if (!IFF_IS_UP(fwddev->d_flags) || fwddev->d_lltype == NET_LL_LOOPBACK)
+    {
+      return OK;
+    }
+
+  DEBUGASSERT(dev != NULL && dev->d_buf != NULL);
 
   /* Check if we are forwarding on the same device that we received the
    * packet from.
@@ -471,6 +489,24 @@ int ipv6_forward_callback(FAR struct net_driver_s *fwddev, FAR void *arg)
 
   if (fwddev != dev)
     {
+      /* Backup the forward IP packet */
+
+      iob = iob_tryalloc(true);
+      if (iob == NULL)
+        {
+          nerr("ERROR: iob alloc failed when forward broadcast\n");
+          return -ENOMEM;
+        }
+
+      iob_reserve(iob, CONFIG_NET_LL_GUARDSIZE);
+      ret = iob_clone_partial(dev->d_iob, dev->d_iob->io_pktlen, 0,
+                              iob, 0, true, false);
+      if (ret < 0)
+        {
+          iob_free_chain(iob);
+          return ret;
+        }
+
       /* Recover the pointer to the IPv6 header in the receiving device's
        * d_buf.
        */
@@ -482,9 +518,14 @@ int ipv6_forward_callback(FAR struct net_driver_s *fwddev, FAR void *arg)
       ret = ipv6_dev_forward(dev, fwddev, ipv6);
       if (ret < 0)
         {
+          iob_free_chain(iob);
           nwarn("WARNING: ipv6_dev_forward failed: %d\n", ret);
           return ret;
         }
+
+      /* Restore device iob with backup iob */
+
+      netdev_iob_replace(dev, iob);
     }
 
   return OK;
@@ -636,7 +677,8 @@ drop:
         return OK;
 
       case -EMULTIHOP:
-        icmpv6_reply(dev, ICMPv6_PACKET_TIME_EXCEEDED, 0, 0);
+        icmpv6_reply(dev, ICMPv6_PACKET_TIME_EXCEEDED, ICMPV6_EXC_HOPLIMIT,
+                     0);
         return OK;
 
       default:

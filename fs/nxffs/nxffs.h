@@ -27,6 +27,7 @@
 
 #include <nuttx/config.h>
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -154,7 +155,7 @@
 
 /* Number of bytes in an the NXFFS magic sequences */
 
-#define NXFFS_MAGICSIZE	          4
+#define NXFFS_MAGICSIZE           4
 
 /* When we allocate FLASH for a new inode data block, we will require that
  * space is available to hold this minimum number of data bytes in addition
@@ -170,16 +171,6 @@
  */
 
 #define NXFFS_NERASED             128
-
-/* Quasi-standard definitions */
-
-#ifndef MIN
-#  define MIN(a,b)                ((a) < (b) ? (a) : (b))
-#endif
-
-#ifndef MAX
-#  define MAX(a,b)                ((a) > (b) ? (a) : (b))
-#endif
 
 /****************************************************************************
  * Public Types

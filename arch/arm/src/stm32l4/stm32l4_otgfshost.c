@@ -24,6 +24,7 @@
 
 #include <nuttx/config.h>
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -143,16 +144,6 @@
 #define STM32L4_SETUP_DELAY         SEC2TICK(5) /* 5 seconds in system ticks */
 #define STM32L4_DATANAK_DELAY       SEC2TICK(5) /* 5 seconds in system ticks */
 
-/* Ever-present MIN/MAX macros */
-
-#ifndef MIN
-#  define  MIN(a, b) (((a) < (b)) ? (a) : (b))
-#endif
-
-#ifndef MAX
-#  define  MAX(a, b) (((a) > (b)) ? (a) : (b))
-#endif
-
 /****************************************************************************
  * Private Types
  ****************************************************************************/
@@ -263,6 +254,8 @@ struct stm32l4_usbhost_s
   volatile struct usbhost_hubport_s *hport;
 #endif
 
+  struct usbhost_devaddr_s devgen;  /* Address generation data */
+
   /* The state of each host channel */
 
   struct stm32l4_chan_s chan[STM32L4_MAX_TX_FIFOS];
@@ -280,8 +273,8 @@ static void stm32l4_checkreg(uint32_t addr, uint32_t val, bool iswrite);
 static uint32_t stm32l4_getreg(uint32_t addr);
 static void stm32l4_putreg(uint32_t addr, uint32_t value);
 #else
-# define stm32l4_getreg(addr)     getreg32(addr)
-# define stm32l4_putreg(addr,val) putreg32(val,addr)
+#  define stm32l4_getreg(addr)     getreg32(addr)
+#  define stm32l4_putreg(addr,val) putreg32(val,addr)
 #endif
 
 static inline void stm32l4_modifyreg(uint32_t addr, uint32_t clrbits,
@@ -4279,7 +4272,7 @@ static int stm32l4_alloc(struct usbhost_driver_s *drvr,
 
   /* There is no special memory requirement for the STM32. */
 
-  alloc = (uint8_t *)kmm_malloc(CONFIG_STM32L4_OTGFS_DESCSIZE);
+  alloc = kmm_malloc(CONFIG_STM32L4_OTGFS_DESCSIZE);
   if (!alloc)
     {
       return -ENOMEM;
@@ -4366,7 +4359,7 @@ static int stm32l4_ioalloc(struct usbhost_driver_s *drvr,
 
   /* There is no special memory requirement */
 
-  alloc = (uint8_t *)kmm_malloc(buflen);
+  alloc = kmm_malloc(buflen);
   if (!alloc)
     {
       return -ENOMEM;
@@ -5265,7 +5258,8 @@ static inline void stm32l4_sw_initialize(struct stm32l4_usbhost_s *priv)
 
   /* Initialize function address generation logic */
 
-  usbhost_devaddr_initialize(&priv->rhport);
+  usbhost_devaddr_initialize(&priv->devgen);
+  priv->rhport.pdevgen = &priv->devgen;
 
   /* Initialize the driver state data */
 

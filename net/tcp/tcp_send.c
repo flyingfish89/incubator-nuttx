@@ -170,7 +170,7 @@ static void tcp_sendcommon(FAR struct net_driver_s *dev,
 
   /* Update device buffer length before setup the IP header */
 
-  iob_update_pktlen(dev->d_iob, dev->d_len);
+  iob_update_pktlen(dev->d_iob, dev->d_len, false);
 
   /* Calculate chk & build L3 header */
 
@@ -181,8 +181,10 @@ static void tcp_sendcommon(FAR struct net_driver_s *dev,
     {
       ninfo("do IPv6 IP header build!\n");
       ipv6_build_header(IPv6BUF, dev->d_len - IPv6_HDRLEN,
-                        IP_PROTO_TCP, dev->d_ipv6addr, conn->u.ipv6.raddr,
-                        IP_TTL_DEFAULT);
+                        IP_PROTO_TCP,
+                        netdev_ipv6_srcaddr(dev, conn->u.ipv6.raddr),
+                        conn->u.ipv6.raddr,
+                        conn->sconn.ttl, conn->sconn.s_tclass);
 
       /* Calculate TCP checksum. */
 
@@ -202,7 +204,7 @@ static void tcp_sendcommon(FAR struct net_driver_s *dev,
       ninfo("do IPv4 IP header build!\n");
       ipv4_build_header(IPv4BUF, dev->d_len, IP_PROTO_TCP,
                         &dev->d_ipaddr, &conn->u.ipv4.raddr,
-                        IP_TTL_DEFAULT, NULL);
+                        conn->sconn.ttl, conn->sconn.s_tos, NULL);
 
       /* Calculate TCP checksum. */
 
@@ -274,11 +276,73 @@ void tcp_send(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn,
       return;
     }
 
-  tcp            = tcp_header(dev);
-  tcp->flags     = flags;
-  dev->d_len     = len;
-  tcp->tcpoffset = (TCP_HDRLEN / 4) << 4;
+  tcp        = tcp_header(dev);
+  tcp->flags = flags;
+  dev->d_len = len;
+
+#ifdef CONFIG_NET_TCP_SELECTIVE_ACK
+  if ((conn->flags & TCP_SACK) && (flags == TCP_ACK) && conn->nofosegs > 0)
+    {
+      int optlen = conn->nofosegs * sizeof(struct tcp_sack_s);
+      int i;
+
+      tcp->optdata[0] = TCP_OPT_NOOP;
+      tcp->optdata[1] = TCP_OPT_NOOP;
+      tcp->optdata[2] = TCP_OPT_SACK;
+      tcp->optdata[3] = TCP_OPT_SACK_PERM_LEN + optlen;
+
+      optlen += 4;
+
+      for (i = 0; i < conn->nofosegs; i++)
+        {
+          ninfo("TCP SACK [%d]"
+                "[%" PRIu32 " : %" PRIu32 " : %" PRIu32 "]\n", i,
+                conn->ofosegs[i].left, conn->ofosegs[i].right,
+                TCP_SEQ_SUB(conn->ofosegs[i].right, conn->ofosegs[i].left));
+          tcp_setsequence(&tcp->optdata[4 + i * 2 * sizeof(uint32_t)],
+                          conn->ofosegs[i].left);
+          tcp_setsequence(&tcp->optdata[4 + (i * 2 + 1) * sizeof(uint32_t)],
+                          conn->ofosegs[i].right);
+        }
+
+      dev->d_len += optlen;
+      tcp->tcpoffset = ((TCP_HDRLEN + optlen) / 4) << 4;
+    }
+  else
+#endif /* CONFIG_NET_TCP_SELECTIVE_ACK */
+    {
+      tcp->tcpoffset = (TCP_HDRLEN / 4) << 4;
+    }
+
   tcp_sendcommon(dev, conn, tcp);
+
+#if defined(CONFIG_NET_STATISTICS) && \
+    defined(CONFIG_NET_TCP_DEBUG_DROP_SEND)
+
+#pragma message \
+  "CONFIG_NET_TCP_DEBUG_DROP_SEND is selected, this is debug " \
+  "feature to drop the tcp send packet on the floor, " \
+  "please confirm the configuration again if you do not want " \
+  "debug the TCP stack."
+
+  /* Debug feature to drop the tcp received packet on the floor */
+
+  if ((flags & TCP_PSH) != 0)
+    {
+      if ((g_netstats.tcp.sent %
+          CONFIG_NET_TCP_DEBUG_DROP_SEND_PROBABILITY) == 0)
+        {
+          uint32_t seq = tcp_getsequence(tcp->seqno);
+
+          ninfo("TCP DROP SNDPKT: "
+                "[%d][%" PRIu32 " : %" PRIu32 " : %d]\n",
+                g_netstats.tcp.sent, seq, TCP_SEQ_ADD(seq, dev->d_sndlen),
+                dev->d_sndlen);
+
+          dev->d_len = 0;
+        }
+    }
+#endif
 }
 
 /****************************************************************************
@@ -298,7 +362,7 @@ void tcp_send(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn,
  *
  ****************************************************************************/
 
-void tcp_reset(FAR struct net_driver_s *dev)
+void tcp_reset(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn)
 {
   FAR struct tcp_hdr_s *tcp;
   uint32_t ackno;
@@ -402,7 +466,7 @@ void tcp_reset(FAR struct net_driver_s *dev)
 
   /* Update device buffer length before setup the IP header */
 
-  iob_update_pktlen(dev->d_iob, dev->d_len);
+  iob_update_pktlen(dev->d_iob, dev->d_len, false);
 
   /* Calculate chk & build L3 header */
 
@@ -414,9 +478,11 @@ void tcp_reset(FAR struct net_driver_s *dev)
       FAR struct ipv6_hdr_s *ipv6 = IPv6BUF;
 
       ipv6_build_header(ipv6, dev->d_len - IPv6_HDRLEN,
-                        IP_PROTO_TCP, dev->d_ipv6addr, ipv6->srcipaddr,
-                        IP_TTL_DEFAULT);
-
+                        IP_PROTO_TCP,
+                        netdev_ipv6_srcaddr(dev, ipv6->srcipaddr),
+                        ipv6->srcipaddr,
+                        conn ? conn->sconn.ttl : IP_TTL_DEFAULT,
+                        conn ? conn->sconn.s_tos : 0);
       tcp->tcpchksum = 0;
       tcp->tcpchksum = ~tcp_ipv6_chksum(dev);
     }
@@ -431,7 +497,8 @@ void tcp_reset(FAR struct net_driver_s *dev)
 
       ipv4_build_header(IPv4BUF, dev->d_len, IP_PROTO_TCP,
                         &dev->d_ipaddr, (FAR in_addr_t *)ipv4->srcipaddr,
-                        IP_TTL_DEFAULT, NULL);
+                        conn ? conn->sconn.ttl : IP_TTL_DEFAULT,
+                        conn ? conn->sconn.s_tos : 0, NULL);
 
       tcp->tcpchksum = 0;
       tcp->tcpchksum = ~tcp_ipv4_chksum(dev);
@@ -513,43 +580,30 @@ void tcp_synack(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn,
       return;
     }
 
-  /* Get values that vary with the underlying IP domain */
+  /* Get the offset TCP header address for this packet */
 
-#ifdef CONFIG_NET_IPv6
-#ifdef CONFIG_NET_IPv4
-  if (IFF_IS_IPv6(dev->d_flags))
-#endif
+  tcp = tcp_header(dev);
+
+  /* Set the packet length for the TCP Maximum Segment Size */
+
+  dev->d_len = tcpip_hdrsize(conn);
+
+  /* Set the packet length for the TCP Maximum Segment Size */
+
+#ifdef CONFIG_NET_TCPPROTO_OPTIONS
+  if (conn->user_mss != 0 && conn->user_mss < tcp_rx_mss(dev))
     {
-      /* Get the offset TCP header address for this packet */
-
-      tcp     = TCPIPv6BUF;
-
-      /* Set the packet length for the TCP Maximum Segment Size */
-
-      dev->d_len  = IPv6TCP_HDRLEN;
+      tcp_mss = conn->user_mss;
     }
-#endif /* CONFIG_NET_IPv6 */
-
-#ifdef CONFIG_NET_IPv4
-#ifdef CONFIG_NET_IPv6
   else
 #endif
     {
-      /* Get the offset TCP header address for this packet */
-
-      tcp     = TCPIPv4BUF;
-
-      /* Set the packet length for the TCP Maximum Segment Size */
-
-      dev->d_len  = IPv4TCP_HDRLEN;
+      tcp_mss = tcp_rx_mss(dev);
     }
-#endif /* CONFIG_NET_IPv4 */
-
-  tcp_mss = tcp_rx_mss(dev);
 
   /* Save the ACK bits */
 
-  tcp->flags      = ack;
+  tcp->flags = ack;
 
   /* We send out the TCP Maximum Segment Size option with our ACK. */
 
@@ -566,6 +620,17 @@ void tcp_synack(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn,
       tcp->optdata[optlen++] = TCP_OPT_WS;
       tcp->optdata[optlen++] = TCP_OPT_WS_LEN;
       tcp->optdata[optlen++] = CONFIG_NET_TCP_WINDOW_SCALE_FACTOR;
+    }
+#endif
+
+#ifdef CONFIG_NET_TCP_SELECTIVE_ACK
+  if (tcp->flags == TCP_SYN ||
+      ((tcp->flags == (TCP_ACK | TCP_SYN)) && (conn->flags & TCP_SACK)))
+    {
+      tcp->optdata[optlen++] = TCP_OPT_NOOP;
+      tcp->optdata[optlen++] = TCP_OPT_NOOP;
+      tcp->optdata[optlen++] = TCP_OPT_SACK_PERM;
+      tcp->optdata[optlen++] = TCP_OPT_SACK_PERM_LEN;
     }
 #endif
 
@@ -642,26 +707,10 @@ uint16_t tcpip_hdrsize(FAR struct tcp_conn_s *conn)
 {
   uint16_t hdrsize = sizeof(struct tcp_hdr_s);
 
-#if defined(CONFIG_NET_IPv4) && defined(CONFIG_NET_IPv6)
-  if (conn->domain == PF_INET)
-    {
-      /* Select the IPv4 domain */
-
-      return sizeof(struct ipv4_hdr_s) + hdrsize;
-    }
-  else /* if (domain == PF_INET6) */
-    {
-      /* Select the IPv6 domain */
-
-      return sizeof(struct ipv6_hdr_s) + hdrsize;
-    }
-#elif defined(CONFIG_NET_IPv4)
-  ((void)conn);
-  return sizeof(struct ipv4_hdr_s) + hdrsize;
-#elif defined(CONFIG_NET_IPv6)
-  ((void)conn);
-  return sizeof(struct ipv6_hdr_s) + hdrsize;
-#endif
+  UNUSED(conn);
+  return net_ip_domain_select(conn->domain,
+                              sizeof(struct ipv4_hdr_s) + hdrsize,
+                              sizeof(struct ipv6_hdr_s) + hdrsize);
 }
 
 #endif /* CONFIG_NET && CONFIG_NET_TCP */

@@ -85,7 +85,7 @@ static ssize_t rpmsgmtd_read(FAR struct mtd_dev_s *dev, off_t offset,
 static ssize_t rpmsgmtd_write(FAR struct mtd_dev_s *dev, off_t offset,
                               size_t nbytes, FAR const uint8_t *buffer);
 #endif
-static size_t  rpmsgmtd_ioctl_arglen(int cmd);
+static ssize_t rpmsgmtd_ioctl_arglen(int cmd);
 static int     rpmsgmtd_ioctl(FAR struct mtd_dev_s *dev, int cmd,
                               unsigned long arg);
 
@@ -548,7 +548,7 @@ out:
  *
  ****************************************************************************/
 
-static size_t rpmsgmtd_ioctl_arglen(int cmd)
+static ssize_t rpmsgmtd_ioctl_arglen(int cmd)
 {
   switch (cmd)
     {
@@ -558,7 +558,7 @@ static size_t rpmsgmtd_ioctl_arglen(int cmd)
       case MTDIOC_UNPROTECT:
         return sizeof(struct mtd_protect_s);
       default:
-        return 0;
+        return -ENOTTY;
     }
 }
 
@@ -584,7 +584,7 @@ static int rpmsgmtd_ioctl(FAR struct mtd_dev_s *dev, int cmd,
   FAR struct rpmsgmtd_s *priv = (FAR struct rpmsgmtd_s *)dev;
   FAR struct rpmsgmtd_ioctl_s *msg;
   uint32_t space;
-  size_t arglen;
+  ssize_t arglen;
   size_t msglen;
 
   /* Sanity checks */
@@ -594,6 +594,11 @@ static int rpmsgmtd_ioctl(FAR struct mtd_dev_s *dev, int cmd,
   /* Call our internal routine to perform the ioctl */
 
   arglen = rpmsgmtd_ioctl_arglen(cmd);
+  if (arglen < 0)
+    {
+      return arglen;
+    }
+
   msglen = sizeof(*msg) + arglen - 1;
 
   msg = rpmsgmtd_get_tx_payload_buffer(priv, &space);
@@ -995,7 +1000,7 @@ static int rpmsgmtd_ept_cb(FAR struct rpmsg_endpoint *ept,
   FAR struct rpmsgmtd_header_s *header = data;
   uint32_t command = header->command;
 
-  if (command < ARRAY_SIZE(g_rpmsgmtd_handler))
+  if (command < nitems(g_rpmsgmtd_handler))
     {
       return g_rpmsgmtd_handler[command](ept, data, len, src, priv);
     }

@@ -35,19 +35,6 @@
  * Configuration
  ****************************************************************************/
 
-/* Hard-coded options */
-
-#undef CPU_ALIGNMENT_TRAP
-#undef CPU_CACHE_ROUND_ROBIN
-#undef CPU_DCACHE_DISABLE
-#undef CPU_ICACHE_DISABLE
-#define CPU_SCTLR_CCP15BEN 1
-#define CPU_BACKGROUND_REGION 1
-#undef CPU_DIV0_FAULT
-#undef CPU_FAST_INTERRUPT
-#undef CPU_IMPL_VECTORS
-#undef CPU_NONMASKABLE_FIQ
-
 /* There are three operational memory configurations:
  *
  * 1. We execute in place in FLASH (CONFIG_BOOT_RUNFROMFLASH=y).  In this case
@@ -89,7 +76,11 @@
  */
 
 #ifndef IDLE_STACK_BASE
-#  define IDLE_STACK_BASE _ebss
+#  ifdef CONFIG_SMP
+#    define IDLE_STACK_BASE _enoinit
+#  else
+#    define IDLE_STACK_BASE _ebss
+#  endif
 #endif
 
 #define IDLE_STACK_TOP  IDLE_STACK_BASE+CONFIG_IDLETHREAD_STACKSIZE
@@ -137,6 +128,32 @@
 	.type	__start, #function
 
 __start:
+#if defined(CONFIG_SMP) && CONFIG_SMP_NCPUS > 1
+	/* Get cpuindex, cpu0 continue boot, others wait event from cpu0 */
+
+	mrc		CP15_MPIDR(r0)
+	and		r0, r0, #0x3
+	cmp		r0, #0
+	beq		__cpu0_start
+	wfe
+	cmp		r0, #1
+	beq		__cpu1_start
+#  if CONFIG_SMP_NCPUS > 2
+	cmp		r0, #2
+	beq		__cpu2_start
+#  endif
+#  if CONFIG_SMP_NCPUS > 3
+	cmp		r0, #3
+	beq		__cpu3_start
+#  endif
+#  if CONFIG_SMP_NCPUS > 4
+	cmp		r0, #4
+	beq		__cpu4_start
+#  endif
+
+__cpu0_start:
+#endif
+
 	/* Make sure that we are in SYS mode with IRQs and FIQs disabled */
 
 	cpsid		if, #PSR_MODE_SYS
@@ -144,6 +161,7 @@ __start:
 	/* Set up the stack pointer and clear the frame pointer. */
 
 	ldr		sp, .Lstackpointer
+	bic		sp, sp, #7			/* Get the stack pointer with 8-byte alignment */
 	mov		fp, #0
 
 	/* Invalidate caches and TLBs.
@@ -197,14 +215,23 @@ __start:
 
 	/* Clear all configurable bits */
 
-	bic		r0, r0, #(SCTLR_M  | SCTLR_A  | SCTLR_C    | SCTLR_CCP15BEN | SCTLR_B)
-	bic		r0, r0, #(SCTLR_SW | SCTLR_I  | SCTLR_V    | SCTLR_RR)
+	bic		r0, r0, #(SCTLR_A  | SCTLR_C  | SCTLR_CCP15BEN | SCTLR_B)
+	bic		r0, r0, #(SCTLR_SW | SCTLR_I  | SCTLR_V        | SCTLR_RR)
 	bic		r0, r0, #(SCTLR_BR | SCTLR_DZ | SCTLR_FI)
-	bic		r0, r0, #(SCTLR_VE | SCTLR_EE | SCTLR_NMFI | SCTLR_TE)
+	bic		r0, r0, #(SCTLR_VE | SCTLR_EE | SCTLR_NMFI     | SCTLR_TE)
+
+#ifndef CONFIG_SMP
+	/* Set bits to enable the MPU
+	 *
+	 *   SCTLR_M     Bit 0:  Enable the MPU
+	 */
+
+	orr		r0, r0, #(SCTLR_M)
+#endif
 
 	/* Set configured bits */
 
-#ifdef CPU_ALIGNMENT_TRAP
+#ifdef CONFIG_ARMV7R_ALIGNMENT_TRAP
 	/* Alignment abort enable
 	 *
 	 *   SCTLR_A Bit 1:  Strict alignment enabled
@@ -213,7 +240,7 @@ __start:
 	orr		r0, r0, #(SCTLR_A)
 #endif
 
-#ifndef CPU_DCACHE_DISABLE
+#if !defined(CONFIG_ARMV7R_DCACHE_DISABLE) && !defined(CONFIG_SMP)
 	/* Dcache enable
 	 *
 	 *   SCTLR_C    Bit 2:  DCache enable
@@ -222,7 +249,7 @@ __start:
 	orr		r0, r0, #(SCTLR_C)
 #endif
 
-#ifdef CPU_SCTLR_CCP15BEN
+#ifdef CONFIG_ARMV7R_SCTLR_CCP15BEN
 	/* Enable memory barriers
 	 *
 	 *  SCTLR_CCP15BEN Bit 5: CP15 barrier enable
@@ -231,7 +258,7 @@ __start:
 	orr		r0, r0, #(SCTLR_CCP15BEN)
 #endif
 
-#ifndef CPU_ICACHE_DISABLE
+#if !defined(CONFIG_ARMV7R_ICACHE_DISABLE) && !defined(CONFIG_SMP)
 	/* Icache enable
 	 *
 	 *   SCTLR_I    Bit 12: ICache enable
@@ -249,7 +276,7 @@ __start:
 	orr		r0, r0, #(SCTLR_V)
 #endif
 
-#ifdef CPU_CACHE_ROUND_ROBIN
+#ifdef CONFIG_ARMV7R_CACHE_ROUND_ROBIN
 	/* Round Robin cache replacement
 	 *
 	 *   SCTLR_RR   Bit 14: Round-robin replacement strategy.
@@ -258,7 +285,7 @@ __start:
 	orr		r0, r0, #(SCTLR_RR)
 #endif
 
-#ifdef CPU_BACKGROUND_REGION
+#ifdef CONFIG_ARMV7R_BACKGROUND_REGION
 	/* Allow PL1 access to back region when MPU is enabled
 	 *
 	 *  SCTLR_BR Bit 17: Background Region bit
@@ -267,7 +294,7 @@ __start:
 	orr		r0, r0, #(SCTLR_BR)
 #endif
 
-#ifdef CPU_DIV0_FAULT
+#ifdef CONFIG_ARMV7R_DIV0_FAULT
 	/* Enable divide by zero faults
 	 *
 	 *   SCTLR_DZ Bit 19: Divide by Zero fault enable bit
@@ -276,7 +303,7 @@ __start:
 	orr		r0, r0, #(SCTLR_DZ)
 #endif
 
-#ifdef CPU_FAST_INTERRUPT
+#ifdef CONFIG_ARMV7R_FAST_INTERRUPT
 	/* Fast interrupts configuration enable bit
 	 *
 	 *   SCTLR_FI Bit 21: Fast interrupts configuration enable bit
@@ -285,7 +312,7 @@ __start:
 	orr		r0, r0, #(SCTLR_FI)
 #endif
 
-#ifdef CPU_IMPL_VECTORS
+#ifdef CONFIG_ARMV7R_IMPL_VECTORS
 	/* Implementation defined interrupt vectors
 	 *
 	 *   SCTLR_VE Bit 24: Interrupt Vectors Enable bit
@@ -303,7 +330,7 @@ __start:
 	orr		r0, r0, #(SCTLR_EE)
 #endif
 
-#ifdef CPU_NONMASKABLE_FIQ
+#ifdef CONFIG_ARMV7R_NONMASKABLE_FIQ
 	/* Non-maskable FIQ support
 	 *
 	 *   SCTLR_NMFI Bit 27: Non-maskable FIQ (NMFI) support
@@ -430,7 +457,7 @@ arm_data_initialize:
 	cmp		r1, r2
 	blt		3b
 
-#ifndef CPU_DCACHE_DISABLE
+#ifndef CONFIG_ARMV7R_DCACHE_DISABLE
 	/* Flush the copied RAM functions into physical RAM so that will
 	 * be available when fetched into the I-Cache.
 	 *

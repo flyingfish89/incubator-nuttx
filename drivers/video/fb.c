@@ -39,10 +39,31 @@
 #include <nuttx/fs/fs.h>
 #include <nuttx/fs/ioctl.h>
 #include <nuttx/video/fb.h>
+#include <nuttx/clock.h>
+#include <nuttx/wdog.h>
+#include <nuttx/mm/circbuf.h>
+
+/****************************************************************************
+ * Pre-processor definitions
+ ****************************************************************************/
 
 /****************************************************************************
  * Private Types
  ****************************************************************************/
+
+struct fb_priv_s
+{
+  int overlay;                    /* Overlay number */
+};
+
+struct fb_paninfo_s
+{
+  FAR struct circbuf_s buf;       /* Pan buffer queued list */
+
+  /* Polling fds of waiting threads */
+
+  FAR struct pollfd *fds[CONFIG_VIDEO_FB_NPOLLWAITERS];
+};
 
 /* This structure defines one framebuffer device.  Note that which is
  * everything in this structure is constant data set up and initialization
@@ -52,11 +73,21 @@
 
 struct fb_chardev_s
 {
-  FAR struct fb_vtable_s *vtable; /* Framebuffer interface */
+  FAR struct fb_vtable_s *vtable;   /* Framebuffer interface */
+  uint8_t plane;                    /* Video plan number */
+  clock_t vsyncoffset;              /* VSync offset ticks */
+  struct wdog_s wdog;               /* VSync offset timer */
+  mutex_t lock;                     /* Mutual exclusion */
+  int16_t crefs;                    /* Number of open references */
+  FAR struct fb_paninfo_s *paninfo; /* Pan info array */
+  size_t paninfo_count;             /* Pan info count */
+};
+
+struct fb_panelinfo_s
+{
   FAR void *fbmem;                /* Start of frame buffer memory */
-  FAR struct pollfd *fds;         /* Polling structure of waiting thread */
   size_t fblen;                   /* Size of the framebuffer */
-  uint8_t plane;                  /* Video plan number */
+  uint8_t fbcount;                /* Count of frame buffer */
   uint8_t bpp;                    /* Bits per pixel */
 };
 
@@ -64,6 +95,15 @@ struct fb_chardev_s
  * Private Function Prototypes
  ****************************************************************************/
 
+static FAR struct pollfd **fb_get_free_pollfds(FAR struct fb_chardev_s *fb,
+                                               int overlay);
+static FAR struct circbuf_s *fb_get_panbuf(FAR struct fb_chardev_s *fb,
+                                           int overlay);
+static int     fb_add_paninfo(FAR struct fb_vtable_s *vtable,
+                              FAR const union fb_paninfo_u *info,
+                              int overlay);
+static int     fb_open(FAR struct file *filep);
+static int     fb_close(FAR struct file *filep);
 static ssize_t fb_read(FAR struct file *filep, FAR char *buffer,
                        size_t buflen);
 static ssize_t fb_write(FAR struct file *filep, FAR const char *buffer,
@@ -74,15 +114,21 @@ static int     fb_mmap(FAR struct file *filep,
                        FAR struct mm_map_entry_s *map);
 static int     fb_poll(FAR struct file *filep, FAR struct pollfd *fds,
                        bool setup);
+static int     fb_get_panelinfo(FAR struct fb_chardev_s *fb,
+                                FAR struct fb_panelinfo_s *panelinfo,
+                                int overlay);
+static int     fb_get_planeinfo(FAR struct fb_chardev_s *fb,
+                                FAR struct fb_planeinfo_s *pinfo,
+                                uint8_t display);
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-static const struct file_operations fb_fops =
+static const struct file_operations g_fb_fops =
 {
-  NULL,          /* open */
-  NULL,          /* close */
+  fb_open,       /* open */
+  fb_close,      /* close */
   fb_read,       /* read */
   fb_write,      /* write */
   fb_seek,       /* seek */
@@ -97,6 +143,189 @@ static const struct file_operations fb_fops =
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: fb_get_free_pollfds
+ ****************************************************************************/
+
+static FAR struct pollfd **fb_get_free_pollfds(FAR struct fb_chardev_s *fb,
+                                               int overlay)
+{
+  FAR struct fb_paninfo_s *paninfo;
+  int id = overlay + 1;
+  int i;
+
+  DEBUGASSERT(id >= 0 && id < fb->paninfo_count);
+
+  paninfo = &fb->paninfo[id];
+
+  for (i = 0; i < CONFIG_VIDEO_FB_NPOLLWAITERS; ++i)
+    {
+      if (!paninfo->fds[i])
+        {
+          return &paninfo->fds[i];
+        }
+    }
+
+  return NULL;
+}
+
+/****************************************************************************
+ * Name: fb_get_panbuf
+ ****************************************************************************/
+
+static FAR struct circbuf_s *fb_get_panbuf(FAR struct fb_chardev_s *fb,
+                                           int overlay)
+{
+  int id = overlay + 1;
+
+  DEBUGASSERT(id >= 0 && id < fb->paninfo_count);
+
+  return &(fb->paninfo[id].buf);
+}
+
+/****************************************************************************
+ * Name: fb_add_paninfo
+ ****************************************************************************/
+
+static int fb_add_paninfo(FAR struct fb_vtable_s *vtable,
+                          FAR const union fb_paninfo_u *info,
+                          int overlay)
+{
+  FAR struct circbuf_s *panbuf;
+  FAR struct fb_chardev_s *fb;
+  irqstate_t flags;
+  ssize_t ret;
+
+  DEBUGASSERT(vtable != NULL);
+
+  /* Prevent calling before getting the vtable. */
+
+  fb = vtable->priv;
+  if (fb == NULL)
+    {
+      return -EINVAL;
+    }
+
+  panbuf = fb_get_panbuf(fb, overlay);
+  if (panbuf == NULL)
+    {
+      return -EINVAL;
+    }
+
+  /* Disable the interrupt when writing to the queue to
+   * prevent it from being modified by the interrupted
+   * thread during the writing process.
+   */
+
+  flags = enter_critical_section();
+
+  /* Write planeinfo information to the queue. */
+
+  ret = circbuf_write(panbuf, info, sizeof(union fb_paninfo_u));
+  DEBUGASSERT(ret == sizeof(union fb_paninfo_u));
+
+  /* Re-enable interrupts */
+
+  leave_critical_section(flags);
+  return ret <= 0 ? -ENOSPC : OK;
+}
+
+/****************************************************************************
+ * Name: fb_open
+ ****************************************************************************/
+
+static int fb_open(FAR struct file *filep)
+{
+  FAR struct inode *inode;
+  FAR struct fb_chardev_s *fb;
+  FAR struct fb_priv_s *priv;
+  int ret;
+
+  inode = filep->f_inode;
+  fb    = inode->i_private;
+
+  DEBUGASSERT(fb->vtable != NULL);
+
+  ret = nxmutex_lock(&fb->lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  priv = kmm_zalloc(sizeof(*priv));
+  if (priv == NULL)
+    {
+      ret = -ENOMEM;
+      goto err_out;
+    }
+
+  if (fb->crefs == 0)
+    {
+      if (fb->vtable->open != NULL &&
+          (ret = fb->vtable->open(fb->vtable)) < 0)
+        {
+          goto err_fb;
+        }
+    }
+
+  fb->crefs++;
+  DEBUGASSERT(fb->crefs > 0);
+
+  priv->overlay = FB_NO_OVERLAY;
+  filep->f_priv = priv;
+
+  nxmutex_unlock(&fb->lock);
+  return 0;
+
+err_fb:
+  kmm_free(priv);
+err_out:
+  nxmutex_unlock(&fb->lock);
+  return ret;
+}
+
+/****************************************************************************
+ * Name: fb_close
+ ****************************************************************************/
+
+static int fb_close(FAR struct file *filep)
+{
+  FAR struct inode *inode;
+  FAR struct fb_chardev_s *fb;
+  FAR struct fb_priv_s *priv;
+  int ret;
+
+  inode = filep->f_inode;
+  fb    = inode->i_private;
+  priv  = filep->f_priv;
+
+  DEBUGASSERT(fb->vtable != NULL && priv != NULL);
+
+  ret = nxmutex_lock(&fb->lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (fb->crefs == 1)
+    {
+      if (fb->vtable->close != NULL)
+        {
+          ret = fb->vtable->close(fb->vtable);
+        }
+    }
+
+  if (ret >= 0)
+    {
+      DEBUGASSERT(fb->crefs > 0);
+      fb->crefs--;
+      kmm_free(priv);
+    }
+
+  nxmutex_unlock(&fb->lock);
+  return ret;
+}
+
+/****************************************************************************
  * Name: fb_read
  ****************************************************************************/
 
@@ -104,37 +333,51 @@ static ssize_t fb_read(FAR struct file *filep, FAR char *buffer, size_t len)
 {
   FAR struct inode *inode;
   FAR struct fb_chardev_s *fb;
+  FAR struct fb_priv_s *priv;
+  struct fb_panelinfo_s panelinfo;
   size_t start;
   size_t end;
   size_t size;
+  int ret;
 
   ginfo("len: %u\n", (unsigned int)len);
 
   /* Get the framebuffer instance */
 
-  DEBUGASSERT(filep != NULL && filep->f_inode != NULL);
   inode = filep->f_inode;
-  fb    = (FAR struct fb_chardev_s *)inode->i_private;
+  fb    = inode->i_private;
+  priv  = filep->f_priv;
+
+  DEBUGASSERT(fb->vtable != NULL && priv != NULL);
+
+  /* Get panel info */
+
+  ret = fb_get_panelinfo(fb, &panelinfo, priv->overlay);
+
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   /* Get the start and size of the transfer */
 
   start = filep->f_pos;
-  if (start >= fb->fblen)
+  if (start >= panelinfo.fblen)
     {
       return 0;  /* Return end-of-file */
     }
 
   end = start + len;
-  if (end >= fb->fblen)
+  if (end >= panelinfo.fblen)
     {
-      end = fb->fblen;
+      end = panelinfo.fblen;
     }
 
   size = end - start;
 
   /* And transfer the data from the frame buffer */
 
-  memcpy(buffer, fb->fbmem + start, size);
+  memcpy(buffer, panelinfo.fbmem + start, size);
   filep->f_pos += size;
   return size;
 }
@@ -148,37 +391,51 @@ static ssize_t fb_write(FAR struct file *filep, FAR const char *buffer,
 {
   FAR struct inode *inode;
   FAR struct fb_chardev_s *fb;
+  FAR struct fb_priv_s *priv;
+  struct fb_panelinfo_s panelinfo;
   size_t start;
   size_t end;
   size_t size;
+  int ret;
 
   ginfo("len: %u\n", (unsigned int)len);
 
   /* Get the framebuffer instance */
 
-  DEBUGASSERT(filep != NULL && filep->f_inode != NULL);
   inode = filep->f_inode;
-  fb    = (FAR struct fb_chardev_s *)inode->i_private;
+  fb    = inode->i_private;
+  priv  = filep->f_priv;
+
+  DEBUGASSERT(fb->vtable != NULL && priv != NULL);
+
+  /* Get panel info */
+
+  ret = fb_get_panelinfo(fb, &panelinfo, priv->overlay);
+
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   /* Get the start and size of the transfer */
 
   start = filep->f_pos;
-  if (start >= fb->fblen)
+  if (start >= panelinfo.fblen)
     {
       return -EFBIG;  /* Cannot extend the framebuffer */
     }
 
   end = start + len;
-  if (end >= fb->fblen)
+  if (end >= panelinfo.fblen)
     {
-      end = fb->fblen;
+      end = panelinfo.fblen;
     }
 
   size = end - start;
 
   /* And transfer the data into the frame buffer */
 
-  memcpy(fb->fbmem + start, buffer, size);
+  memcpy(panelinfo.fbmem + start, buffer, size);
   filep->f_pos += size;
   return size;
 }
@@ -197,6 +454,8 @@ static off_t fb_seek(FAR struct file *filep, off_t offset, int whence)
 {
   FAR struct inode *inode;
   FAR struct fb_chardev_s *fb;
+  FAR struct fb_priv_s *priv;
+  struct fb_panelinfo_s panelinfo;
   off_t newpos;
   int ret;
 
@@ -204,9 +463,11 @@ static off_t fb_seek(FAR struct file *filep, off_t offset, int whence)
 
   /* Get the framebuffer instance */
 
-  DEBUGASSERT(filep != NULL && filep->f_inode != NULL);
   inode = filep->f_inode;
-  fb    = (FAR struct fb_chardev_s *)inode->i_private;
+  fb    = inode->i_private;
+  priv  = filep->f_priv;
+
+  DEBUGASSERT(fb->vtable != NULL && priv != NULL);
 
   /* Determine the new, requested file position */
 
@@ -221,7 +482,17 @@ static off_t fb_seek(FAR struct file *filep, off_t offset, int whence)
       break;
 
     case SEEK_END:
-      newpos = fb->fblen + offset;
+
+      /* Get panel info */
+
+      ret = fb_get_panelinfo(fb, &panelinfo, priv->overlay);
+
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      newpos = panelinfo.fblen + offset;
       break;
 
     default:
@@ -274,9 +545,8 @@ static int fb_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   /* Get the framebuffer instance */
 
-  DEBUGASSERT(filep != NULL && filep->f_inode != NULL);
   inode = filep->f_inode;
-  fb    = (FAR struct fb_chardev_s *)inode->i_private;
+  fb    = inode->i_private;
 
   /* Process the IOCTL command */
 
@@ -298,9 +568,8 @@ static int fb_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
           FAR struct fb_planeinfo_s *pinfo =
             (FAR struct fb_planeinfo_s *)((uintptr_t)arg);
 
-          DEBUGASSERT(pinfo != 0 && fb->vtable != NULL &&
-                      fb->vtable->getplaneinfo != NULL);
-          ret = fb->vtable->getplaneinfo(fb->vtable, fb->plane, pinfo);
+          DEBUGASSERT(pinfo != 0);
+          ret = fb_get_planeinfo(fb, pinfo, pinfo->display);
         }
         break;
 
@@ -374,16 +643,15 @@ static int fb_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       case FBIO_SELECT_OVERLAY:  /* Select video overlay */
         {
           struct fb_overlayinfo_s oinfo;
+          FAR struct fb_priv_s *priv = filep->f_priv;
 
-          DEBUGASSERT(fb->vtable != NULL &&
+          DEBUGASSERT(priv != NULL && fb->vtable != NULL &&
                       fb->vtable->getoverlayinfo != NULL);
           memset(&oinfo, 0, sizeof(oinfo));
           ret = fb->vtable->getoverlayinfo(fb->vtable, arg, &oinfo);
-          if (ret == OK)
+          if (ret >= 0)
             {
-              fb->fbmem = oinfo.fbmem;
-              fb->fblen = oinfo.fblen;
-              fb->bpp   = oinfo.bpp;
+              priv->overlay = arg;
             }
         }
         break;
@@ -455,6 +723,17 @@ static int fb_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         }
         break;
 
+      case FBIOSET_DESTAREA:  /* Set destination area on the primary FB */
+        {
+          FAR struct fb_overlayinfo_s *oinfo =
+            (FAR struct fb_overlayinfo_s *)((uintptr_t)arg);
+
+          DEBUGASSERT(oinfo != 0 && fb->vtable != NULL &&
+                      fb->vtable->setdestarea != NULL);
+          ret = fb->vtable->setdestarea(fb->vtable, oinfo);
+        }
+        break;
+
 #ifdef CONFIG_FB_OVERLAY_BLIT
       case FBIOSET_BLIT:  /* Blit operation between video overlays */
         {
@@ -478,6 +757,26 @@ static int fb_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         }
         break;
 #endif
+
+      case FBIOPAN_OVERLAY:
+        {
+          FAR struct fb_overlayinfo_s *oinfo =
+            (FAR struct fb_overlayinfo_s *)((uintptr_t)arg);
+          union fb_paninfo_u paninfo;
+
+          DEBUGASSERT(oinfo != 0 && fb->vtable != NULL);
+
+          memcpy(&paninfo, oinfo, sizeof(*oinfo));
+
+          if (fb->vtable->panoverlay != NULL)
+            {
+              fb->vtable->panoverlay(fb->vtable, oinfo);
+            }
+
+          ret = fb_add_paninfo(fb->vtable, &paninfo, oinfo->overlay);
+        }
+        break;
+
 #endif /* CONFIG_FB_OVERLAY */
 
       case FBIOSET_POWER:
@@ -522,10 +821,25 @@ static int fb_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         {
           FAR struct fb_planeinfo_s *pinfo =
             (FAR struct fb_planeinfo_s *)((uintptr_t)arg);
+          union fb_paninfo_u paninfo;
 
-          DEBUGASSERT(pinfo != NULL && fb->vtable != NULL &&
-                      fb->vtable->pandisplay != NULL);
-          ret = fb->vtable->pandisplay(fb->vtable, pinfo);
+          DEBUGASSERT(pinfo != NULL && fb->vtable != NULL);
+
+          memcpy(&paninfo, pinfo, sizeof(*pinfo));
+
+          if (fb->vtable->pandisplay != NULL)
+            {
+              fb->vtable->pandisplay(fb->vtable, pinfo);
+            }
+
+          ret = fb_add_paninfo(fb->vtable, &paninfo, FB_NO_OVERLAY);
+        }
+        break;
+
+      case FBIOSET_VSYNCOFFSET:
+        {
+          fb->vsyncoffset = USEC2TICK(arg);
+          ret = OK;
         }
         break;
 
@@ -537,16 +851,14 @@ static int fb_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
             (FAR struct fb_var_screeninfo *)((uintptr_t)arg);
 
           DEBUGASSERT(varinfo != 0 && fb->vtable != NULL &&
-                      fb->vtable->getvideoinfo != NULL &&
-                      fb->vtable->getplaneinfo != NULL);
+                      fb->vtable->getvideoinfo != NULL);
           ret = fb->vtable->getvideoinfo(fb->vtable, &vinfo);
           if (ret < 0)
             {
               break;
             }
 
-          memset(&pinfo, 0, sizeof(pinfo));
-          ret = fb->vtable->getplaneinfo(fb->vtable, fb->plane, &pinfo);
+          ret = fb_get_planeinfo(fb, &pinfo, 0);
           if (ret < 0)
             {
               break;
@@ -631,16 +943,14 @@ static int fb_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
             (FAR struct fb_fix_screeninfo *)((uintptr_t)arg);
 
           DEBUGASSERT(fixinfo != 0 && fb->vtable != NULL &&
-                      fb->vtable->getvideoinfo != NULL &&
-                      fb->vtable->getplaneinfo != NULL);
+                      fb->vtable->getvideoinfo != NULL);
           ret = fb->vtable->getvideoinfo(fb->vtable, &vinfo);
           if (ret < 0)
             {
               break;
             }
 
-          memset(&pinfo, 0, sizeof(pinfo));
-          ret = fb->vtable->getplaneinfo(fb->vtable, fb->plane, &pinfo);
+          ret = fb_get_planeinfo(fb, &pinfo, 0);
           if (ret < 0)
             {
               break;
@@ -663,8 +973,15 @@ static int fb_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         break;
 
       default:
-        gerr("ERROR: Unsupported IOCTL command: %d\n", cmd);
-        ret = -ENOTTY;
+        if (fb->vtable->ioctl != NULL)
+          {
+            ret = fb->vtable->ioctl(fb->vtable, cmd, arg);
+          }
+        else
+          {
+            gerr("ERROR: Unsupported IOCTL command: %d\n", cmd);
+            ret = -ENOTTY;
+          }
         break;
     }
 
@@ -675,24 +992,37 @@ static int fb_mmap(FAR struct file *filep, FAR struct mm_map_entry_s *map)
 {
   FAR struct inode *inode;
   FAR struct fb_chardev_s *fb;
-  int ret = -EINVAL;
+  FAR struct fb_priv_s *priv;
+  struct fb_panelinfo_s panelinfo;
+  int ret;
 
   /* Get the framebuffer instance */
 
-  DEBUGASSERT(filep != NULL && filep->f_inode != NULL);
   inode = filep->f_inode;
-  fb    = (FAR struct fb_chardev_s *)inode->i_private;
+  fb    = inode->i_private;
+  priv  = filep->f_priv;
+
+  DEBUGASSERT(fb->vtable != NULL && priv != NULL);
+
+  /* Get panel info */
+
+  ret = fb_get_panelinfo(fb, &panelinfo, priv->overlay);
+
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   /* Return the address corresponding to the start of frame buffer. */
 
-  if (map->offset >= 0 && map->offset < fb->fblen &&
-      map->length && map->offset + map->length <= fb->fblen)
+  if (map->offset >= 0 && map->offset < panelinfo.fblen &&
+      map->length && map->offset + map->length <= panelinfo.fblen)
     {
-      map->vaddr = (FAR char *)fb->fbmem + map->offset;
-      ret = OK;
+      map->vaddr = (FAR char *)panelinfo.fbmem + map->offset;
+      return OK;
     }
 
-  return ret;
+  return -EINVAL;
 }
 
 /****************************************************************************
@@ -707,32 +1037,161 @@ static int fb_poll(FAR struct file *filep, struct pollfd *fds, bool setup)
 {
   FAR struct inode *inode;
   FAR struct fb_chardev_s *fb;
+  FAR struct fb_priv_s *priv;
+  FAR struct circbuf_s *panbuf;
+  FAR struct pollfd **pollfds;
+  irqstate_t flags;
+  int ret = OK;
 
   /* Get the framebuffer instance */
 
-  DEBUGASSERT(filep != NULL && filep->f_inode != NULL);
   inode = filep->f_inode;
-  fb    = (FAR struct fb_chardev_s *)inode->i_private;
+  fb    = inode->i_private;
+  priv  = filep->f_priv;
+
+  DEBUGASSERT(fb->vtable != NULL && priv != NULL);
+
+  flags = enter_critical_section();
 
   if (setup)
     {
-      if (fb->fds == NULL)
+      pollfds = fb_get_free_pollfds(fb, priv->overlay);
+      if (pollfds == NULL)
         {
-          fb->fds = fds;
-          fds->priv = &fb->fds;
+          ret = -EBUSY;
+          goto errout;
         }
-      else
+
+      *pollfds = fds;
+      fds->priv = pollfds;
+
+      panbuf = fb_get_panbuf(fb, priv->overlay);
+      if (!circbuf_is_full(panbuf))
         {
-          return -EBUSY;
+          poll_notify(pollfds, 1, POLLOUT);
         }
     }
-  else if (fds->priv)
+  else if (fds->priv != NULL)
     {
-      fb->fds = NULL;
+      /* This is a request to tear down the poll. */
+
+      FAR struct pollfd **slot = (FAR struct pollfd **)fds->priv;
+      *slot = NULL;
       fds->priv = NULL;
     }
 
+errout:
+  leave_critical_section(flags);
+  return ret;
+}
+
+/****************************************************************************
+ * Name: fb_get_panelinfo
+ ****************************************************************************/
+
+static int fb_get_panelinfo(FAR struct fb_chardev_s *fb,
+                            FAR struct fb_panelinfo_s *panelinfo,
+                            int overlay)
+{
+  struct fb_planeinfo_s pinfo;
+  struct fb_videoinfo_s vinfo;
+  int ret;
+
+#ifdef CONFIG_FB_OVERLAY
+  if (overlay != FB_NO_OVERLAY)
+    {
+      struct fb_overlayinfo_s oinfo;
+      DEBUGASSERT(fb->vtable->getoverlayinfo != NULL);
+      memset(&oinfo, 0, sizeof(oinfo));
+      ret = fb->vtable->getoverlayinfo(fb->vtable, overlay, &oinfo);
+
+      if (ret < 0)
+        {
+          gerr("ERROR: getoverlayinfo() failed: %d\n", ret);
+          return ret;
+        }
+
+      panelinfo->fbmem   = oinfo.fbmem;
+      panelinfo->fblen   = oinfo.fblen;
+      panelinfo->fbcount = oinfo.yres_virtual == 0 ?
+                           1 : (oinfo.yres_virtual / oinfo.yres);
+      panelinfo->bpp     = oinfo.bpp;
+      return OK;
+    }
+#endif
+
+  ret = fb_get_planeinfo(fb, &pinfo, 0);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = fb->vtable->getvideoinfo(fb->vtable, &vinfo);
+  if (ret < 0)
+    {
+      gerr("ERROR: getvideoinfo() failed: %d\n", ret);
+      return ret;
+    }
+
+  panelinfo->fbmem   = pinfo.fbmem;
+  panelinfo->fblen   = pinfo.fblen;
+  panelinfo->fbcount = pinfo.yres_virtual == 0 ?
+                       1 : (pinfo.yres_virtual / vinfo.yres);
+  panelinfo->bpp     = pinfo.bpp;
+
   return OK;
+}
+
+/****************************************************************************
+ * Name: fb_get_planeinfo
+ ****************************************************************************/
+
+static int fb_get_planeinfo(FAR struct fb_chardev_s *fb,
+                            FAR struct fb_planeinfo_s *pinfo,
+                            uint8_t display)
+{
+  int ret;
+
+  DEBUGASSERT(fb->vtable != NULL);
+  DEBUGASSERT(fb->vtable->getplaneinfo != NULL);
+
+  memset(pinfo, 0, sizeof(struct fb_planeinfo_s));
+  pinfo->display = display;
+
+  ret = fb->vtable->getplaneinfo(fb->vtable, fb->plane, pinfo);
+
+  if (ret < 0)
+    {
+      gerr("ERROR: getplaneinfo() failed: %d\n", ret);
+      return ret;
+    }
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: fb_do_pollnotify
+ ****************************************************************************/
+
+static void fb_do_pollnotify(wdparm_t arg)
+{
+  FAR struct fb_paninfo_s *paninfo = (FAR struct fb_paninfo_s *)arg;
+  irqstate_t flags;
+  int i;
+
+  flags = enter_critical_section();
+
+  for (i = 0; i < CONFIG_VIDEO_FB_NPOLLWAITERS; i++)
+    {
+      if (paninfo->fds[i] != NULL)
+        {
+          /* Notify framebuffer is writable. */
+
+          poll_notify(&paninfo->fds[i], 1, POLLOUT);
+        }
+    }
+
+  leave_critical_section(flags);
 }
 
 /****************************************************************************
@@ -746,22 +1205,316 @@ static int fb_poll(FAR struct file *filep, struct pollfd *fds, bool setup)
  *
  ****************************************************************************/
 
-void fb_pollnotify(FAR struct fb_vtable_s *vtable)
+static void fb_pollnotify(FAR struct fb_vtable_s *vtable, int overlay)
 {
   FAR struct fb_chardev_s *fb;
+  int id = overlay + 1;
 
   DEBUGASSERT(vtable != NULL);
 
   fb = vtable->priv;
 
-  /* Notify framebuffer is writable. */
+  /* Prevent calling before getting the vtable. */
 
-  poll_notify(&fb->fds, 1, POLLOUT);
+  if (fb == NULL)
+    {
+      return;
+    }
+
+  DEBUGASSERT(id >= 0 && id < fb->paninfo_count);
+
+  if (fb->vsyncoffset > 0)
+    {
+      wd_start(&fb->wdog, fb->vsyncoffset, fb_do_pollnotify,
+               (wdparm_t)(&fb->paninfo[id]));
+    }
+  else
+    {
+      fb_do_pollnotify((wdparm_t)(&fb->paninfo[id]));
+    }
 }
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: fb_peek_paninfo
+ * Description:
+ *   Peek a frame from pan info queue of the specified overlay.
+ *
+ * Input Parameters:
+ *   vtable  - Pointer to framebuffer's virtual table.
+ *   info    - Pointer to pan info.
+ *   overlay - Overlay index.
+ *
+ * Returned Value:
+ *   Zero is returned on success; a negated errno value is returned on any
+ *   failure.
+ ****************************************************************************/
+
+int fb_peek_paninfo(FAR struct fb_vtable_s *vtable,
+                    FAR union fb_paninfo_u *info,
+                    int overlay)
+{
+  FAR struct circbuf_s *panbuf;
+  FAR struct fb_chardev_s *fb;
+  irqstate_t flags;
+  ssize_t ret;
+
+  /* Prevent calling before getting the vtable. */
+
+  fb = vtable->priv;
+  if (fb == NULL)
+    {
+      return -EINVAL;
+    }
+
+  panbuf = fb_get_panbuf(fb, overlay);
+  if (panbuf == NULL)
+    {
+      return -EINVAL;
+    }
+
+  flags = enter_critical_section();
+
+  /* Attempt to peek a frame from the vsync queue. */
+
+  ret = circbuf_peek(panbuf, info, sizeof(union fb_paninfo_u));
+  DEBUGASSERT(ret <= 0 || ret == sizeof(union fb_paninfo_u));
+
+  /* Re-enable interrupts */
+
+  leave_critical_section(flags);
+  return ret <= 0 ? -ENOSPC : OK;
+}
+
+/****************************************************************************
+ * Name: fb_remove_paninfo
+ * Description:
+ *   Remove a frame from pan info queue of the specified overlay.
+ *
+ * Input Parameters:
+ *   vtable  - Pointer to framebuffer's virtual table.
+ *   overlay - Overlay index.
+ *
+ * Returned Value:
+ *   Zero is returned on success; a negated errno value is returned on any
+ *   failure.
+ ****************************************************************************/
+
+int fb_remove_paninfo(FAR struct fb_vtable_s *vtable, int overlay)
+{
+  FAR struct circbuf_s *panbuf;
+  FAR struct fb_chardev_s *fb;
+  irqstate_t flags;
+  ssize_t ret;
+
+  fb = vtable->priv;
+  if (fb == NULL)
+    {
+      return -EINVAL;
+    }
+
+  panbuf = fb_get_panbuf(fb, overlay);
+  if (panbuf == NULL)
+    {
+      return -EINVAL;
+    }
+
+  flags = enter_critical_section();
+
+  /* Attempt to take a frame from the pan info. */
+
+  ret = circbuf_skip(panbuf, sizeof(union fb_paninfo_u));
+  DEBUGASSERT(ret <= 0 || ret == sizeof(union fb_paninfo_u));
+
+  /* Re-enable interrupts */
+
+  leave_critical_section(flags);
+
+  if (ret == sizeof(union fb_paninfo_u))
+    {
+      fb_pollnotify(vtable, overlay);
+    }
+
+  return ret <= 0 ? -ENOSPC : OK;
+}
+
+/****************************************************************************
+ * Name: fb_paninfo_count
+ * Description:
+ *   Get pan info count of specified overlay pan info queue.
+ *
+ * Input Parameters:
+ *   vtable  - Pointer to framebuffer's virtual table.
+ *   overlay - Overlay index.
+ *
+ * Returned Value:
+ *   a non-negative value is returned on success; a negated errno value is
+ *   returned on any failure.
+ ****************************************************************************/
+
+int fb_paninfo_count(FAR struct fb_vtable_s *vtable, int overlay)
+{
+  FAR struct circbuf_s *panbuf;
+  FAR struct fb_chardev_s *fb;
+  irqstate_t flags;
+  ssize_t ret;
+
+  /* Prevent calling before getting the vtable. */
+
+  fb = vtable->priv;
+  if (fb == NULL)
+    {
+      return -EINVAL;
+    }
+
+  panbuf = fb_get_panbuf(fb, overlay);
+  if (panbuf == NULL)
+    {
+      return -EINVAL;
+    }
+
+  flags = enter_critical_section();
+
+  ret = circbuf_used(panbuf) / sizeof(union fb_paninfo_u);
+
+  leave_critical_section(flags);
+
+  return ret;
+}
+
+/****************************************************************************
+ * Name: fb_register_device
+ *
+ * Description:
+ *   Register the framebuffer character device at /dev/fbN where N is the
+ *   display number if the devices supports only a single plane.  If the
+ *   hardware supports multiple color planes, then the device will be
+ *   registered at /dev/fbN.M where N is the again display number but M
+ *   is the display plane.
+ *
+ * Input Parameters:
+ *   display - The display number for the case of boards supporting multiple
+ *             displays or for hardware that supports multiple
+ *             layers (each layer is consider a display).  Typically zero.
+ *   plane   - Identifies the color plane on hardware that supports separate
+ *             framebuffer "planes" for each color component.
+ *   vtable  - Pointer to framebuffer's virtual table.
+ *
+ * Returned Value:
+ *   Zero (OK) is returned success; a negated errno value is returned on any
+ *   failure.
+ *
+ ****************************************************************************/
+
+int fb_register_device(int display, int plane,
+                       FAR struct fb_vtable_s *vtable)
+{
+  FAR struct fb_chardev_s *fb;
+  struct fb_panelinfo_s panelinfo;
+  struct fb_videoinfo_s vinfo;
+  char devname[16];
+  int nplanes;
+  int ret;
+  size_t i;
+
+  /* Allocate a framebuffer state instance */
+
+  fb = kmm_zalloc(sizeof(struct fb_chardev_s));
+  if (fb == NULL)
+    {
+      return -ENOMEM;
+    }
+
+  DEBUGASSERT((unsigned)plane <= UINT8_MAX);
+  DEBUGASSERT(vtable != NULL);
+  fb->plane  = plane;
+  fb->vtable = vtable;
+
+  /* Initialize the frame buffer instance. */
+
+  DEBUGASSERT(vtable->getvideoinfo != NULL);
+  ret = vtable->getvideoinfo(vtable, &vinfo);
+  if (ret < 0)
+    {
+      gerr("ERROR: getvideoinfo() failed: %d\n", ret);
+      goto errout_with_fb;
+    }
+
+  nplanes = vinfo.nplanes;
+  DEBUGASSERT(vinfo.nplanes > 0 && (unsigned)plane < vinfo.nplanes);
+
+#ifdef CONFIG_FB_OVERLAY
+  fb->paninfo_count = vinfo.noverlays;
+#endif
+
+  /* Add the primary framebuffer */
+
+  fb->paninfo_count += 1;
+  fb->paninfo = kmm_zalloc(sizeof(struct fb_paninfo_s) * fb->paninfo_count);
+
+  if (fb->paninfo == NULL)
+    {
+      gerr("ERROR: alloc panbuf failed\n");
+      goto errout_with_fb;
+    }
+
+  for (i = 0; i < fb->paninfo_count; i++)
+    {
+      ret = fb_get_panelinfo(fb, &panelinfo, i - 1);
+      if (ret < 0)
+        {
+          goto errout_with_paninfo;
+        }
+
+      ret = circbuf_init(&(fb->paninfo[i].buf), NULL, panelinfo.fbcount
+                         * sizeof(union fb_paninfo_u));
+
+      DEBUGASSERT(ret == 0);
+
+      /* Clear the framebuffer memory */
+
+      memset(panelinfo.fbmem, 0, panelinfo.fblen);
+    }
+
+  /* Register the framebuffer device */
+
+  if (nplanes < 2)
+    {
+      snprintf(devname, 16, "/dev/fb%d", display);
+    }
+  else
+    {
+      snprintf(devname, 16, "/dev/fb%d.%d", display, plane);
+    }
+
+  nxmutex_init(&fb->lock);
+
+  ret = register_driver(devname, &g_fb_fops, 0666, fb);
+  if (ret < 0)
+    {
+      gerr("ERROR: register_driver() failed: %d\n", ret);
+      goto errout_with_nxmutex;
+    }
+
+  vtable->priv = fb;
+  return OK;
+
+errout_with_nxmutex:
+  nxmutex_destroy(&fb->lock);
+errout_with_paninfo:
+  while (i-- > 0)
+    {
+      circbuf_uninit(&(fb->paninfo[i].buf));
+    }
+
+  kmm_free(fb->paninfo);
+errout_with_fb:
+  kmm_free(fb);
+  return ret;
+}
 
 /****************************************************************************
  * Name: fb_register
@@ -788,23 +1541,8 @@ void fb_pollnotify(FAR struct fb_vtable_s *vtable)
 
 int fb_register(int display, int plane)
 {
-  FAR struct fb_chardev_s *fb;
-  struct fb_videoinfo_s vinfo;
-  struct fb_planeinfo_s pinfo;
-#ifdef CONFIG_FB_OVERLAY
-  struct fb_overlayinfo_s oinfo;
-#endif
-  char devname[16];
-  int nplanes;
+  FAR struct fb_vtable_s *vtable;
   int ret;
-
-  /* Allocate a framebuffer state instance */
-
-  fb = (FAR struct fb_chardev_s *)kmm_zalloc(sizeof(struct fb_chardev_s));
-  if (fb == NULL)
-    {
-      return -ENOMEM;
-    }
 
   /* Initialize the frame buffer device. */
 
@@ -813,91 +1551,15 @@ int fb_register(int display, int plane)
     {
       gerr("ERROR: up_fbinitialize() failed for display %d: %d\n",
            display, ret);
-      goto errout_with_fb;
+      return ret;
     }
 
-  DEBUGASSERT((unsigned)plane <= UINT8_MAX);
-  fb->plane  = plane;
-
-  fb->vtable = up_fbgetvplane(display, plane);
-  if (fb->vtable == NULL)
+  vtable = up_fbgetvplane(display, plane);
+  if (vtable == NULL)
     {
       gerr("ERROR: up_fbgetvplane() failed, vplane=%d\n", plane);
-      goto errout_with_fb;
+      return -EINVAL;
     }
 
-  fb->vtable->priv = fb;
-
-  /* Initialize the frame buffer instance. */
-
-  DEBUGASSERT(fb->vtable->getvideoinfo != NULL);
-  ret = fb->vtable->getvideoinfo(fb->vtable, &vinfo);
-  if (ret < 0)
-    {
-      gerr("ERROR: getvideoinfo() failed: %d\n", ret);
-      goto errout_with_fb;
-    }
-
-  nplanes = vinfo.nplanes;
-  DEBUGASSERT(vinfo.nplanes > 0 && (unsigned)plane < vinfo.nplanes);
-
-  DEBUGASSERT(fb->vtable->getplaneinfo != NULL);
-  memset(&pinfo, 0, sizeof(pinfo));
-  ret = fb->vtable->getplaneinfo(fb->vtable, plane, &pinfo);
-  if (ret < 0)
-    {
-      gerr("ERROR: getplaneinfo() failed: %d\n", ret);
-      goto errout_with_fb;
-    }
-
-  fb->fbmem  = pinfo.fbmem;
-  fb->fblen  = pinfo.fblen;
-  fb->bpp    = pinfo.bpp;
-
-  /* Clear the framebuffer memory */
-
-  memset(pinfo.fbmem, 0, pinfo.fblen);
-
-#ifdef CONFIG_FB_OVERLAY
-  /* Initialize first overlay but do not select */
-
-  DEBUGASSERT(fb->vtable->getoverlayinfo != NULL);
-  memset(&oinfo, 0, sizeof(oinfo));
-  ret = fb->vtable->getoverlayinfo(fb->vtable, 0, &oinfo);
-  if (ret < 0)
-    {
-      gerr("ERROR: getoverlayinfo() failed: %d\n", ret);
-      goto errout_with_fb;
-    }
-
-  /* Clear the overlay memory. Necessary when plane 0 and overlay 0
-   * different.
-   */
-
-  memset(oinfo.fbmem, 0, oinfo.fblen);
-#endif
-
-  /* Register the framebuffer device */
-
-  if (nplanes < 2)
-    {
-      snprintf(devname, 16, "/dev/fb%d", display);
-    }
-  else
-    {
-      snprintf(devname, 16, "/dev/fb%d.%d", display, plane);
-    }
-
-  ret = register_driver(devname, &fb_fops, 0666, (FAR void *)fb);
-  if (ret < 0)
-    {
-      gerr("ERROR: register_driver() failed: %d\n", ret);
-      goto errout_with_fb;
-    }
-
-  return OK;
-
-errout_with_fb:
-  kmm_free(fb);
-  return ret;
+  return fb_register_device(display, plane, vtable);
 }

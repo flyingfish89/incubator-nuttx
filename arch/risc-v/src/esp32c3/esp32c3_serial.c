@@ -80,7 +80,7 @@
 #    define CONSOLE_DEV     g_uart0_dev     /* UART0 is console */
 #    define TTYS0_DEV       g_uart0_dev     /* UART0 is ttyS0 */
 #    define UART0_ASSIGNED      1
-# elif defined(CONFIG_UART1_SERIAL_CONSOLE)
+#  elif defined(CONFIG_UART1_SERIAL_CONSOLE)
 #    define CONSOLE_DEV         g_uart1_dev  /* UART1 is console */
 #    define TTYS0_DEV           g_uart1_dev  /* UART1 is ttyS0 */
 #    define UART1_ASSIGNED      1
@@ -245,7 +245,7 @@ static uart_dev_t g_uart1_dev =
  *
  * Description:
  *   This is the UART interrupt handler.  It will be invoked when an
- *   interrupt is received on the 'irq'  It should call uart_xmitchars or
+ *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
  *   uart_recvchars to perform the appropriate data transfers.  The
  *   interrupt handling logic must be able to map the 'irq' number into the
  *   appropriate uart_dev_s structure in order to call these functions.
@@ -663,9 +663,9 @@ static bool esp32c3_txempty(struct uart_dev_s *dev)
   struct esp32c3_uart_s *priv = dev->priv;
 
   reg = getreg32(UART_INT_RAW_REG(priv->id));
-  reg = reg & UART_TXFIFO_EMPTY_INT_RAW_M;
+  reg = REG_MASK(reg, UART_TX_DONE_INT_RAW);
 
-  return (reg > 0) ? true : false;
+  return reg > 0;
 }
 
 /****************************************************************************

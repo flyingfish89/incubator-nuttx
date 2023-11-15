@@ -67,7 +67,6 @@ static uint16_t tcp_poll_eventhandler(FAR struct net_driver_s *dev,
                                       FAR void *pvpriv, uint16_t flags)
 {
   FAR struct tcp_poll_s *info = pvpriv;
-  int reason;
 
   ninfo("flags: %04x\n", flags);
 
@@ -97,6 +96,9 @@ static uint16_t tcp_poll_eventhandler(FAR struct net_driver_s *dev,
 
       if ((flags & TCP_DISCONN_EVENTS) != 0)
         {
+#ifdef CONFIG_NET_SOCKOPTS
+          int reason;
+
           /* TCP_TIMEDOUT: Connection aborted due to too many
            *               retransmissions.
            */
@@ -129,6 +131,7 @@ static uint16_t tcp_poll_eventhandler(FAR struct net_driver_s *dev,
             }
 
           _SO_CONN_SETERRNO(info->conn, reason);
+#endif
 
           /* Mark that the connection has been lost */
 
@@ -216,7 +219,8 @@ int tcp_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
 
   /* Non-blocking connection ? */
 
-  nonblock_conn = (conn->tcpstateflags == TCP_SYN_SENT &&
+  nonblock_conn = ((conn->tcpstateflags == TCP_ALLOCATED ||
+                    conn->tcpstateflags == TCP_SYN_SENT) &&
                    _SS_ISNONBLOCK(conn->sconn.s_flags));
 
   /* Find a container to hold the poll information */
@@ -226,6 +230,7 @@ int tcp_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
     {
       if (++info >= &conn->pollinfo[CONFIG_NET_TCP_NPOLLWAITERS])
         {
+          DEBUGPANIC();
           ret = -ENOMEM;
           goto errout_with_lock;
         }
@@ -284,7 +289,7 @@ int tcp_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
 
   /* Check for read data or backlogged connection availability now */
 
-  if (conn->readahead != NULL || tcp_backlogavailable(conn))
+  if (conn->readahead != NULL || tcp_backlogpending(conn))
     {
       /* Normal data may be read without blocking. */
 
@@ -339,6 +344,7 @@ int tcp_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
        * exceptional event.
        */
 
+      _SO_CONN_SETERRNO(conn, ENOTCONN);
       eventset |= POLLERR | POLLHUP;
     }
   else if (_SS_ISCONNECTED(conn->sconn.s_flags) &&

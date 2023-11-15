@@ -48,8 +48,9 @@
 
 /* The array containing all IPPROTO_ICMP socket connections */
 
-#ifndef CONFIG_NET_ALLOC_CONNS
-static struct icmpv6_conn_s g_icmpv6_connections[CONFIG_NET_ICMPv6_NCONNS];
+#if CONFIG_NET_ICMPv6_PREALLOC_CONNS > 0
+static struct icmpv6_conn_s
+              g_icmpv6_connections[CONFIG_NET_ICMPv6_PREALLOC_CONNS];
 #endif
 
 /* A list of all free IPPROTO_ICMP socket connections */
@@ -76,10 +77,10 @@ static dq_queue_t g_active_icmpv6_connections;
 
 void icmpv6_sock_initialize(void)
 {
-#ifndef CONFIG_NET_ALLOC_CONNS
+#if CONFIG_NET_ICMPv6_PREALLOC_CONNS > 0
   int i;
 
-  for (i = 0; i < CONFIG_NET_ICMPv6_NCONNS; i++)
+  for (i = 0; i < CONFIG_NET_ICMPv6_PREALLOC_CONNS; i++)
     {
       /* Move the connection structure to the free list */
 
@@ -109,13 +110,22 @@ FAR struct icmpv6_conn_s *icmpv6_alloc(void)
   ret = nxmutex_lock(&g_free_lock);
   if (ret >= 0)
     {
-#ifdef CONFIG_NET_ALLOC_CONNS
+#if CONFIG_NET_ICMPv6_ALLOC_CONNS > 0
       if (dq_peek(&g_active_icmpv6_connections) == NULL)
         {
-          conn = kmm_zalloc(sizeof(*conn) * CONFIG_NET_ICMPv6_NCONNS);
+#if CONFIG_NET_ICMPv6_MAX_CONNS > 0
+          if (dq_count(&g_active_icmpv6_connections) +
+              CONFIG_NET_ICMPv6_ALLOC_CONNS >= CONFIG_NET_ICMPv6_MAX_CONNS)
+            {
+              nxmutex_unlock(&g_free_lock);
+              return NULL;
+            }
+#endif
+
+          conn = kmm_zalloc(sizeof(*conn) * CONFIG_NET_ICMPv6_ALLOC_CONNS);
           if (conn != NULL)
             {
-              for (ret = 0; ret < CONFIG_NET_ICMPv6_NCONNS; ret++)
+              for (ret = 0; ret < CONFIG_NET_ICMPv6_ALLOC_CONNS; ret++)
                 {
                   dq_addlast(&conn[ret].sconn.node,
                              &g_free_icmpv6_connections);
@@ -162,13 +172,23 @@ void icmpv6_free(FAR struct icmpv6_conn_s *conn)
 
   dq_rem(&conn->sconn.node, &g_active_icmpv6_connections);
 
-  /* Clear the connection structure */
+  /* If this is a preallocated or a batch allocated connection store it in
+   * the free connections list. Else free it.
+   */
 
-  memset(conn, 0, sizeof(*conn));
+#if CONFIG_NET_ICMPv6_ALLOC_CONNS == 1
+  if (conn < g_icmpv6_connections || conn >= (g_icmpv6_connections +
+      CONFIG_NET_ICMPv6_PREALLOC_CONNS))
+    {
+      kmm_free(conn);
+    }
+  else
+#endif
+    {
+      memset(conn, 0, sizeof(*conn));
+      dq_addlast(&conn->sconn.node, &g_free_icmpv6_connections);
+    }
 
-  /* Free the connection */
-
-  dq_addlast(&conn->sconn.node, &g_free_icmpv6_connections);
   nxmutex_unlock(&g_free_lock);
 }
 
@@ -232,31 +252,36 @@ FAR struct icmpv6_conn_s *icmpv6_nextconn(FAR struct icmpv6_conn_s *conn)
 }
 
 /****************************************************************************
- * Name: icmpv6_findconn
+ * Name: icmpv6_foreach
  *
  * Description:
- *   Find an ICMPv6 connection structure that is expecting a ICMPv6 ECHO
- *  response with this ID from this device
+ *   Enumerate each ICMPv6 connection structure. This function will terminate
+ *   when either (1) all connection have been enumerated or (2) when a
+ *   callback returns any non-zero value.
  *
  * Assumptions:
  *   This function is called from network logic at with the network locked.
  *
  ****************************************************************************/
 
-FAR struct icmpv6_conn_s *icmpv6_findconn(FAR struct net_driver_s *dev,
-                                          uint16_t id)
+int icmpv6_foreach(icmpv6_callback_t callback, FAR void *arg)
 {
   FAR struct icmpv6_conn_s *conn;
+  int ret = 0;
 
-  for (conn = icmpv6_nextconn(NULL); conn != NULL;
-       conn = icmpv6_nextconn(conn))
+  if (callback != NULL)
     {
-      if (conn->id == id && conn->dev == dev && conn->nreqs > 0)
+      for (conn = icmpv6_nextconn(NULL); conn != NULL;
+           conn = icmpv6_nextconn(conn))
         {
-          return conn;
+          ret = callback(conn, arg);
+          if (ret != 0)
+            {
+              break;
+            }
         }
     }
 
-  return conn;
+  return ret;
 }
 #endif /* CONFIG_NET_ICMP */

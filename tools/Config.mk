@@ -22,12 +22,9 @@
 
 .SUFFIXES:
 
-ifeq ($(CONFIG_WINDOWS_NATIVE),y)
-export SHELL=cmd
-endif
-
 # Control build verbosity
 #
+#  V=0:   Exit silent mode
 #  V=1,2: Enable echo of commands
 #  V=2:   Enable bug/verbose options in tools and scripts
 
@@ -37,6 +34,22 @@ else ifeq ($(V),2)
 export Q :=
 else
 export Q := @
+endif
+
+ifeq ($(CONFIG_WINDOWS_NATIVE),y)
+  export SHELL=cmd
+else ifeq ($(V),)
+  BASHCMD := $(shell command -v bash 2> /dev/null)
+  ifneq ($(BASHCMD),)
+    export SHELL=$(BASHCMD)
+    export ECHO_BEGIN=@echo -ne "\033[1K\r"
+    export ECHO_END=$(ECHO_BEGIN)
+  endif
+endif
+
+ifeq ($(ECHO_BEGIN),)
+  export ECHO_BEGIN=@echo # keep a trailing space here
+  export ECHO_END=
 endif
 
 # These are configuration variables that are quoted by configuration tool
@@ -267,12 +280,13 @@ endif
 # <filename>.S)
 
 define PREPROCESS
-	@echo "CPP: $1->$2"
+	$(ECHO_BEGIN)"CPP: $1->$2 "
 	$(Q) $(CPP) $(CPPFLAGS) $($(strip $1)_CPPFLAGS) $1 -o $2
+	$(ECHO_END)
 endef
 
 # COMPILE - Default macro to compile one C file
-# Example: $(call COMPILE, in-file, out-file)
+# Example: $(call COMPILE, in-file, out-file, flags)
 #
 # Depends on these settings defined in board-specific Make.defs file
 # installed at $(TOPDIR)/Make.defs:
@@ -284,12 +298,13 @@ endef
 # change the options used with the single file <filename>.c
 
 define COMPILE
-	@echo "CC: $1"
-	$(Q) $(CCACHE) $(CC) -c $(CFLAGS) $($(strip $1)_CFLAGS) $1 -o $2
+	$(ECHO_BEGIN)"CC: $1 "
+	$(Q) $(CCACHE) $(CC) -c $(CFLAGS) $3 $($(strip $1)_CFLAGS) $1 -o $2
+	$(ECHO_END)
 endef
 
 # COMPILEXX - Default macro to compile one C++ file
-# Example: $(call COMPILEXX, in-file, out-file)
+# Example: $(call COMPILEXX, in-file, out-file, flags)
 #
 # Depends on these settings defined in board-specific Make.defs file
 # installed at $(TOPDIR)/Make.defs:
@@ -302,8 +317,9 @@ endef
 # extension .cpp could also be used.  The same applies mutatis mutandis.
 
 define COMPILEXX
-	@echo "CXX: $1"
-	$(Q) $(CCACHE) $(CXX) -c $(CXXFLAGS) $($(strip $1)_CXXFLAGS) $1 -o $2
+	$(ECHO_BEGIN)"CXX: $1 "
+	$(Q) $(CCACHE) $(CXX) -c $(CXXFLAGS) $3 $($(strip $1)_CXXFLAGS) $1 -o $2
+	$(ECHO_END)
 endef
 
 # COMPILERUST - Default macro to compile one Rust file
@@ -320,8 +336,9 @@ endef
 # applies mutatis mutandis.
 
 define COMPILERUST
-	@echo "RUSTC: $1"
+	$(ECHO_BEGIN)"RUSTC: $1 "
 	$(Q) $(RUSTC) --emit obj $(RUSTFLAGS) $($(strip $1)_RUSTFLAGS) $1 -o $2
+	$(ECHO_END)
 endef
 
 # COMPILEZIG - Default macro to compile one Zig file
@@ -338,8 +355,9 @@ endef
 # applies mutatis mutandis.
 
 define COMPILEZIG
-	@echo "ZIG: $1"
+	$(ECHO_BEGIN)"ZIG: $1 "
 	$(Q) $(ZIG) build-obj $(ZIGFLAGS) $($(strip $1)_ZIGFLAGS) --name $(basename $2) $1
+	$(ECHO_END)
 endef
 
 # ASSEMBLE - Default macro to assemble one assembly language file
@@ -363,20 +381,22 @@ endef
 # is used by some toolchains.  The same applies mutatis mutandis.
 
 define ASSEMBLE
-	@echo "AS: $1"
+	$(ECHO_BEGIN)"AS: $1 "
 	$(Q) $(CCACHE) $(CC) -c $(AFLAGS) $1 $($(strip $1)_AFLAGS) -o $2
+	$(ECHO_END)
 endef
 
 # INSTALL_LIB - Install a library $1 into target $2
 # Example: $(call INSTALL_LIB, libabc.a, $(TOPDIR)/staging/)
 
 define INSTALL_LIB
-	@echo "IN: $1 -> $2"
+	$(ECHO_BEGIN)"IN: $1 -> $2 "
 	$(Q) install -m 0644 $1 $2
+	$(ECHO_END)
 endef
 
-# ARCHIVE_ADD - Add a list of files to an archive
-# Example: $(call ARCHIVE_ADD, archive-file, "file1 file2 file3 ...")
+# ARCHIVE - Add a list of files to an archive
+# Example: $(call ARCHIVE, archive-file, "file1 file2 file3 ...")
 #
 # Note: The fileN strings may not contain spaces or  characters that may be
 # interpreted strangely by the shell
@@ -391,17 +411,8 @@ endef
 #
 #   CONFIG_WINDOWS_NATIVE - Defined for a Windows native build
 
-define ARCHIVE_ADD
-	@echo "AR (add): ${shell basename $(1)} $(2)"
-	$(Q) $(AR) $1 $(2)
-endef
-
-# ARCHIVE - Same as above, but ensure the archive is
-# created from scratch
-
 define ARCHIVE
-	$(Q) $(RM) $1
-	$(Q) $(AR) $1 $(2)
+	$(AR) $1  $2
 endef
 
 # PRELINK - Prelink a list of files
@@ -436,6 +447,15 @@ define PRELINK
 	$(Q) $(LD) -Ur -o $1 $2 && $(OBJCOPY) --localize-hidden $1
 endef
 endif
+
+# PREBUILD -- Perform pre build operations
+# Some architectures require the use of special tools and special handling
+# BEFORE building NuttX. The `Make.defs` files for those architectures
+# should override the following define with the correct operations for
+# that platform.
+
+define PREBUILD
+endef
 
 # POSTBUILD -- Perform post build operations
 # Some architectures require the use of special tools and special handling
@@ -534,10 +554,26 @@ define FINDSCRIPT
 	$(if $(wildcard $(BOARD_DIR)$(DELIM)scripts$(DELIM)$(1)),$(BOARD_DIR)$(DELIM)scripts$(DELIM)$(1),$(BOARD_COMMON_DIR)$(DELIM)scripts$(DELIM)$(1))
 endef
 
+# DOWNLOAD - Download file. The URL base is joined with TARBALL by '/' and
+#            downloaded to the TARBALL file.
+#            The third argument is an output path. The second argument is used
+#            if it is not provided or is empty.
+# Example: $(call DOWNLOAD,$(FOO_URL_BASE),$(FOO_TARBALL),foo.out,foo-)
+
+define DOWNLOAD
+	$(ECHO_BEGIN)"Downloading: $(if $3,$3,$2) "
+	$(Q) curl -L $(if $(V),,-Ss) $(1)/$(2) -o $(if $(3),$(3),$(2))
+	$(ECHO_END)
+endef
+
 # CLEAN - Default clean target
 
 ifeq ($(CONFIG_ARCH_COVERAGE),y)
 	EXTRA = *.gcno *.gcda
+endif
+
+ifeq ($(CONFIG_STACK_USAGE),y)
+	EXTRA += *.su
 endif
 
 ifeq ($(CONFIG_WINDOWS_NATIVE),y)
@@ -548,11 +584,12 @@ define CLEAN
 	$(Q) if exist (del /f /q  .*.swp)
 	$(call DELFILE,$(subst /,\,$(OBJS)))
 	$(Q) if exist $(BIN) (del /f /q  $(subst /,\,$(BIN)))
+	$(Q) if exist $(BIN).lock (del /f /q  $(subst /,\,$(BIN).lock))
 	$(Q) if exist $(EXTRA) (del /f /q  $(subst /,\,$(EXTRA)))
 endef
 else
 define CLEAN
-	$(Q) rm -f *$(OBJEXT) *$(LIBEXT) *~ .*.swp $(OBJS) $(BIN) $(EXTRA)
+	$(Q) rm -f *$(OBJEXT) *$(LIBEXT) *~ .*.swp $(OBJS) $(BIN) $(BIN).lock $(EXTRA)
 endef
 endif
 
@@ -619,6 +656,24 @@ else
     ARCHXXINCLUDES += ${INCSYSDIR_PREFIX}$(TOPDIR)$(DELIM)include$(DELIM)etl
   endif
 endif
+
+ifeq ($(CONFIG_LIBM_NEWLIB),y)
+  ARCHINCLUDES += ${INCSYSDIR_PREFIX}$(TOPDIR)$(DELIM)libs$(DELIM)libm$(DELIM)newlib$(DELIM)include
+  ARCHXXINCLUDES += ${INCSYSDIR_PREFIX}$(TOPDIR)$(DELIM)libs$(DELIM)libm$(DELIM)newlib$(DELIM)include
+endif
+
+#libmcs`s math.h should include after libcxx, or it will override libcxx/include/math.h and build error
+ifeq ($(CONFIG_LIBM_LIBMCS),y)
+  ARCHDEFINES += ${DEFINE_PREFIX}LIBMCS_LONG_DOUBLE_IS_64BITS
+  ARCHXXINCLUDES += ${INCSYSDIR_PREFIX}$(TOPDIR)$(DELIM)libs$(DELIM)libm$(DELIM)libmcs$(DELIM)libmcs$(DELIM)libm$(DELIM)include
+  ARCHINCLUDES += ${INCSYSDIR_PREFIX}$(TOPDIR)$(DELIM)libs$(DELIM)libm$(DELIM)libmcs$(DELIM)libmcs$(DELIM)libm$(DELIM)include
+endif
+
+ifeq ($(CONFIG_LIBM_OPENLIBM),y)
+  ARCHINCLUDES += ${INCSYSDIR_PREFIX}$(TOPDIR)$(DELIM)libs$(DELIM)libm$(DELIM)openlibm$(DELIM)openlibm$(DELIM)include
+  ARCHXXINCLUDES += ${INCSYSDIR_PREFIX}$(TOPDIR)$(DELIM)libs$(DELIM)libm$(DELIM)openlibm$(DELIM)openlibm$(DELIM)include
+endif
+
 ARCHXXINCLUDES += ${INCSYSDIR_PREFIX}$(TOPDIR)$(DELIM)include
 
 # Convert filepaths to their proper system format (i.e. Windows/Unix)
@@ -628,3 +683,14 @@ ifeq ($(CONFIG_CYGWIN_WINTOOL),y)
 else
   CONVERT_PATH = $1
 endif
+
+# Upper/Lower case string, add the `UL` prefix to private function 
+
+ULPOP = $(wordlist 3,$(words $(1)),$(1))
+ULSUB = $(subst $(word 1,$(1)),$(word 2,$(1)),$(2))
+ULMAP = $(if $(1),$(call ULSUB,$(1),$(call ULMAP,$(call ULPOP,$(1)),$(2))),$(2))
+UPPERMAP = a A b B c C d D e E f F g G h H i I j J k K l L m M n N o O p P q Q r R s S t T u U v V w W x X y Y z Z
+LOWERMAP = A a B b C c D d E e F f G g H h I i J j K k L l M m N n O o P p Q q R r S s T t U u V v W w X x Y y Z z
+
+UPPER_CASE = $(call ULMAP,$(UPPERMAP),$(1))
+LOWER_CASE = $(call ULMAP,$(LOWERMAP),$(1))

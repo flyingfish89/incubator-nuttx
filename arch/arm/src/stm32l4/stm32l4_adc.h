@@ -29,6 +29,7 @@
 #include <nuttx/analog/adc.h>
 #include "chip.h"
 #include "hardware/stm32l4_adc.h"
+#include "stm32l4_dma.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -338,7 +339,7 @@
 #  if CONFIG_STM32L4_ADC1_EXTTRIG > 0
 #    define ADC1_EXTCFG_VALUE \
             ADC_CFGR_EXTEN(CONFIG_STM32L4_ADC1_EXTTRIG)  | \
-            ADC_CFGR_EXTSEL(CONFIG_STM32L4_ADC1_EXTSEL)                        
+            ADC_CFGR_EXTSEL(CONFIG_STM32L4_ADC1_EXTSEL)
 #  endif
 #endif /* CONFIG_STM32L4_ADC1_EXTTRIG */
 
@@ -352,7 +353,7 @@
 #  if CONFIG_STM32L4_ADC2_EXTTRIG > 0
 #    define ADC2_EXTCFG_VALUE \
             ADC_CFGR_EXTEN(CONFIG_STM32L4_ADC2_EXTTRIG)  | \
-            ADC_CFGR_EXTSEL(CONFIG_STM32L4_ADC2_EXTSEL)                        
+            ADC_CFGR_EXTSEL(CONFIG_STM32L4_ADC2_EXTSEL)
 #  endif
 #endif /* CONFIG_STM32L4_ADC2_EXTTRIG */
 
@@ -366,7 +367,7 @@
 #  if CONFIG_STM32L4_ADC3_EXTTRIG > 0
 #    define ADC3_EXTCFG_VALUE \
             ADC_CFGR_EXTEN(CONFIG_STM32L4_ADC3_EXTTRIG)  | \
-            ADC_CFGR_EXTSEL(CONFIG_STM32L4_ADC3_EXTSEL)                        
+            ADC_CFGR_EXTSEL(CONFIG_STM32L4_ADC3_EXTSEL)
 #  endif
 #endif /* CONFIG_STM32L4_ADC3_EXTTRIG */
 
@@ -387,7 +388,7 @@
 #  if CONFIG_STM32L4_ADC1_JEXTTRIG > 0
 #    define ADC1_JEXTCFG_VALUE \
             ADC_JSQR_JEXTEN(CONFIG_STM32L4_ADC1_JEXTTRIG) | \
-            ADC_JSQR_JEXTSEL(CONFIG_STM32L4_ADC1_JEXTSEL)                        
+            ADC_JSQR_JEXTSEL(CONFIG_STM32L4_ADC1_JEXTSEL)
 #  endif
 #endif /* CONFIG_STM32L4_ADC1_JEXTTRIG */
 
@@ -399,7 +400,7 @@
 #  if CONFIG_STM32L4_ADC2_JEXTTRIG > 0
 #    define ADC2_JEXTCFG_VALUE \
             ADC_JSQR_JEXTEN(CONFIG_STM32L4_ADC2_JEXTTRIG) | \
-            ADC_JSQR_JEXTSEL(CONFIG_STM32L4_ADC2_JEXTSEL)                        
+            ADC_JSQR_JEXTSEL(CONFIG_STM32L4_ADC2_JEXTSEL)
 #  endif
 #endif /* CONFIG_STM32L4_ADC2_JEXTTRIG */
 
@@ -411,7 +412,7 @@
 #  if CONFIG_STM32L4_ADC3_JEXTTRIG > 0
 #    define ADC3_JEXTCFG_VALUE \
             ADC_JSQR_JEXTEN(CONFIG_STM32L4_ADC3_JEXTTRIG) | \
-            ADC_JSQR_JEXTSEL(CONFIG_STM32L4_ADC3_JEXTSEL)                        
+            ADC_JSQR_JEXTSEL(CONFIG_STM32L4_ADC3_JEXTSEL)
 #  endif
 #endif /* CONFIG_STM32L4_ADC3_JEXTTRIG */
 
@@ -458,8 +459,6 @@
         (adc)->llops->val_get(adc)
 #define ADC_INJDATA_GET(adc, chan)                   \
         (adc)->llops->inj_get(adc, chan)
-#define ADC_REGBUF_REGISTER(adc, buffer, len)        \
-        (adc)->llops->regbuf_reg(adc, buffer, len)
 #define ADC_REG_STARTCONV(adc, state)                \
         (adc)->llops->reg_startconv(adc, state)
 #define ADC_INJ_STARTCONV(adc, state)                \
@@ -470,6 +469,15 @@
         (adc)->llops->extsel_set(adc, extcfg)
 #define ADC_DUMP_REGS(adc)                           \
         (adc)->llops->dump_regs(adc)
+
+#ifdef ADC_HAVE_DMA
+#  define ADC_REGBUF_REGISTER(adc, buffer, len)      \
+        (adc)->llops->regbuf_reg(adc, buffer, len)
+#  define ADC_DMA_START(adc, cb, buf, len)           \
+        (adc)->llops->dma_start(adc, cb, buf, len)
+#  define ADC_DMA_STOP(adc)                          \
+        (adc)->llops->dma_stop(adc)
+#endif
 
 /* IOCTL Commands ***********************************************************
  *
@@ -524,11 +532,6 @@ struct stm32_adc_ops_s
 
   uint32_t (*val_get)(struct stm32_adc_dev_s *dev);
 
-  /* Register buffer for ADC DMA transfer */
-
-  int (*regbuf_reg)(struct stm32_adc_dev_s *dev, uint16_t *buffer,
-                    uint8_t len);
-
   /* Start/stop regular conversion */
 
   void (*reg_startconv)(struct stm32_adc_dev_s *dev, bool state);
@@ -556,6 +559,22 @@ struct stm32_adc_ops_s
   /* Start/stop injected conversion */
 
   void (*inj_startconv)(struct stm32_adc_dev_s *dev, bool state);
+#endif
+
+#ifdef ADC_HAVE_DMA
+  /* Register buffer for ADC DMA transfer */
+
+  int (*regbuf_reg)(struct stm32_adc_dev_s *dev, uint16_t *buffer,
+                    uint16_t len);
+
+  /* Start DMA */
+
+  void (*dma_start)(struct stm32_adc_dev_s *dev, dma_callback_t callback,
+                    uint16_t *buffer, uint16_t len);
+
+  /* Stop DMA */
+
+  void (*dma_stop)(struct stm32_adc_dev_s *dev);
 #endif
 
   /* Dump ADC regs */

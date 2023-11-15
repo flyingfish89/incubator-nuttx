@@ -33,6 +33,7 @@
 
 #include <nuttx/config.h>
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <inttypes.h>
 #include <stdint.h>
@@ -69,16 +70,6 @@
 
 #ifndef CONFIG_LIBC_SLCDCODEC
 #  error "This SLCD driver requires CONFIG_LIBC_SLCDCODEC"
-#endif
-
-/* The ever-present MIN/MAX macros ******************************************/
-
-#ifndef MIN
-#  define MIN(a,b) (((a) < (b)) ? (a) : (b))
-#endif
-
-#ifndef MAX
-#  define MAX(a,b) (((a) > (b)) ? (a) : (b))
 #endif
 
 /* LCD **********************************************************************/
@@ -1147,7 +1138,7 @@ static ssize_t slcd_write(struct file *filep,
    */
 
   memset(&state, 0, sizeof(struct slcdstate_s));
-  result = slcd_decode(&instream.public, &state, &prev, &count);
+  result = slcd_decode(&instream.common, &state, &prev, &count);
 
   lcdinfo("slcd_decode returned result=%d char=%d count=%d\n",
            result, prev, count);
@@ -1171,7 +1162,7 @@ static ssize_t slcd_write(struct file *filep,
 
   /* Now decode and process every byte in the input buffer */
 
-  while ((result = slcd_decode(&instream.public,
+  while ((result = slcd_decode(&instream.common,
                                &state, &ch, &count)) != SLCDRET_EOF)
     {
       lcdinfo("slcd_decode returned result=%d char=%d count=%d\n",

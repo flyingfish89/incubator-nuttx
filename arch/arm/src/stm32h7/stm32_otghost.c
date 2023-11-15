@@ -24,6 +24,7 @@
 
 #include <nuttx/config.h>
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <inttypes.h>
 #include <stdint.h>
@@ -62,6 +63,33 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+/* OTG host selection *******************************************************/
+
+#if defined(CONFIG_STM32H7_OTGFS_HOST)
+#  define STM32_IRQ_OTG         STM32_IRQ_OTGFS
+#  define STM32_OTG_BASE        STM32_OTGFS_BASE
+#  define GPIO_OTG_DM           GPIO_OTGFS_DM
+#  define GPIO_OTG_DP           GPIO_OTGFS_DP
+#  define GPIO_OTG_ID           GPIO_OTGFS_ID
+#  define GPIO_OTG_SOF          GPIO_OTGFS_SOF
+#  define STM32_OTG_FIFO_SIZE   4096
+#elif defined(CONFIG_STM32H7_OTGHS_HOST)
+#  error OTGHS HOST role not supported yet
+#  define STM32_IRQ_OTG         STM32_IRQ_OTGHS
+#  define STM32_OTG_BASE        STM32_OTGHS_BASE
+#  define GPIO_OTG_DM           GPIO_OTGHS_DM
+#  define GPIO_OTG_DP           GPIO_OTGHS_DP
+#  define GPIO_OTG_ID           GPIO_OTGHS_ID
+#  define GPIO_OTG_SOF          GPIO_OTGHS_SOF
+#  define STM32_OTG_FIFO_SIZE   4096
+#else
+#  error Not selected USBDEV peripheral
+#endif
+
+#if defined(CONFIG_STM32H7_OTGFS_HOST) && defined(CONFIG_STM32H7_OTGHS_HOST)
+#  error Only one HOST role supported
+#endif
 
 /* Configuration ************************************************************/
 
@@ -145,16 +173,6 @@
 #define STM32_FLUSH_DELAY         200000      /* In loop counts */
 #define STM32_SETUP_DELAY         SEC2TICK(5) /* 5 seconds in system ticks */
 #define STM32_DATANAK_DELAY       SEC2TICK(5) /* 5 seconds in system ticks */
-
-/* Ever-present MIN/MAX macros */
-
-#ifndef MIN
-#  define  MIN(a, b) (((a) < (b)) ? (a) : (b))
-#endif
-
-#ifndef MAX
-#  define  MAX(a, b) (((a) > (b)) ? (a) : (b))
-#endif
 
 /****************************************************************************
  * Private Types
@@ -266,6 +284,8 @@ struct stm32_usbhost_s
   volatile struct usbhost_hubport_s *hport;
 #endif
 
+  struct usbhost_devaddr_s devgen;  /* Address generation data */
+
   /* The state of each host channel */
 
   struct stm32_chan_s chan[STM32_MAX_TX_FIFOS];
@@ -283,8 +303,8 @@ static void stm32_checkreg(uint32_t addr, uint32_t val, bool iswrite);
 static uint32_t stm32_getreg(uint32_t addr);
 static void stm32_putreg(uint32_t addr, uint32_t value);
 #else
-# define stm32_getreg(addr)     getreg32(addr)
-# define stm32_putreg(addr,val) putreg32(val,addr)
+#  define stm32_getreg(addr)     getreg32(addr)
+#  define stm32_putreg(addr,val) putreg32(val,addr)
 #endif
 
 static inline void stm32_modifyreg(uint32_t addr, uint32_t clrbits,
@@ -4252,7 +4272,7 @@ static int stm32_alloc(struct usbhost_driver_s *drvr,
 
   /* There is no special memory requirement for the STM32. */
 
-  alloc = (uint8_t *)kmm_malloc(CONFIG_STM32H7_OTG_DESCSIZE);
+  alloc = kmm_malloc(CONFIG_STM32H7_OTG_DESCSIZE);
   if (!alloc)
     {
       return -ENOMEM;
@@ -4336,7 +4356,7 @@ static int stm32_ioalloc(struct usbhost_driver_s *drvr,
 
   /* There is no special memory requirement */
 
-  alloc = (uint8_t *)kmm_malloc(buflen);
+  alloc = kmm_malloc(buflen);
   if (!alloc)
     {
       return -ENOMEM;
@@ -5228,7 +5248,8 @@ static inline void stm32_sw_initialize(struct stm32_usbhost_s *priv)
 
   /* Initialize function address generation logic */
 
-  usbhost_devaddr_initialize(&priv->rhport);
+  usbhost_devaddr_initialize(&priv->devgen);
+  priv->rhport.pdevgen = &priv->devgen;
 
   /* Initialize the driver state data */
 
@@ -5445,7 +5466,7 @@ struct usbhost_connection_s *stm32_otgfshost_initialize(int controller)
 
   /* Attach USB host controller interrupt handler */
 
-  if (irq_attach(STM32_IRQ_OTGFS, stm32_gint_isr, NULL) != 0)
+  if (irq_attach(STM32_IRQ_OTG, stm32_gint_isr, NULL) != 0)
     {
       usbhost_trace1(OTG_TRACE1_IRQATTACH, 0);
       return NULL;
@@ -5457,7 +5478,7 @@ struct usbhost_connection_s *stm32_otgfshost_initialize(int controller)
 
   /* Enable interrupts at the interrupt controller */
 
-  up_enable_irq(STM32_IRQ_OTGFS);
+  up_enable_irq(STM32_IRQ_OTG);
   return &g_usbconn;
 }
 

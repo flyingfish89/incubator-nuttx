@@ -608,7 +608,7 @@ static struct s32k1xx_uart_s g_lpuart2priv =
 #  ifdef CONFIG_LPUART2_RXDMA
   .dma_rxreqsrc = S32K1XX_DMACHAN_LPUART2_RX,
   .rxfifo        = g_lpuart2rxfifo,
-# endif
+#  endif
 };
 #endif
 
@@ -658,7 +658,7 @@ static int s32k1xx_dma_nextrx(struct s32k1xx_uart_s *priv)
 {
   int dmaresidual = s32k1xx_dmach_getcount(priv->rxdma);
 
-  return RXDMA_BUFFER_SIZE - dmaresidual;
+  return (RXDMA_BUFFER_SIZE - dmaresidual) % RXDMA_BUFFER_SIZE;
 }
 #endif
 
@@ -753,7 +753,6 @@ static int s32k1xx_dma_setup(struct uart_dev_s *dev)
             }
 
           nxsem_init(&priv->txdmasem, 0, 1);
-          nxsem_set_protocol(&priv->txdmasem, SEM_PRIO_NONE);
         }
 
       /* Enable Tx DMA for the UART */
@@ -814,7 +813,7 @@ static int s32k1xx_dma_setup(struct uart_dev_s *dev)
       modifyreg32(priv->uartbase + S32K1XX_LPUART_BAUD_OFFSET,
                   0, LPUART_BAUD_RDMAE);
 
-      /* Enable itnerrupt on Idel and erros */
+      /* Enable itnerrupt on Idel and errors */
 
       modifyreg32(priv->uartbase + S32K1XX_LPUART_CTRL_OFFSET, 0,
                   LPUART_CTRL_PEIE |
@@ -1031,9 +1030,11 @@ static void s32k1xx_detach(struct uart_dev_s *dev)
  * Name: s32k1xx_interrupt (and front-ends)
  *
  * Description:
- *   This is the common UART interrupt handler.  It should cal
- *   uart_transmitchars or uart_receivechar to perform the appropriate data
- *   transfers.
+ *   This is the common UART interrupt handler.  It will be invoked when an
+ *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
+ *   uart_recvchars to perform the appropriate data transfers.  The
+ *   interrupt handling logic must be able to map the 'arg' to the
+ *   appropriate uart_dev_s structure in order to call these functions.
  *
  ****************************************************************************/
 
@@ -1127,8 +1128,8 @@ static int s32k1xx_interrupt(int irq, void *context, void *arg)
 
       /* Handle outgoing, transmit bytes */
 
-      if ((usr & LPUART_STAT_TC) != 0 &&
-          (priv->ie & LPUART_CTRL_TCIE) != 0)
+      if ((usr & LPUART_STAT_TDRE) != 0 &&
+          (priv->ie & LPUART_CTRL_TIE) != 0)
         {
           uart_xmitchars(dev);
           handled = true;
@@ -1148,7 +1149,9 @@ static int s32k1xx_interrupt(int irq, void *context, void *arg)
 
 static int s32k1xx_ioctl(struct file *filep, int cmd, unsigned long arg)
 {
-#if defined(CONFIG_SERIAL_TIOCSERGSTRUCT) || defined(CONFIG_SERIAL_TERMIOS)
+#if defined(CONFIG_SERIAL_TIOCSERGSTRUCT) \
+  || defined(CONFIG_SERIAL_TERMIOS) \
+  || defined(CONFIG_S32K1XX_LPUART_INVERT)
   struct inode *inode = filep->f_inode;
   struct uart_dev_s *dev = inode->i_private;
   irqstate_t flags;
@@ -1346,7 +1349,6 @@ static int s32k1xx_ioctl(struct file *filep, int cmd, unsigned long arg)
         uint32_t ctrl;
         uint32_t stat;
         uint32_t regval;
-        irqstate_t flags;
         struct s32k1xx_uart_s *priv = (struct s32k1xx_uart_s *)dev->priv;
 
         flags  = spin_lock_irqsave(NULL);
@@ -1766,9 +1768,12 @@ static void s32k1xx_dma_txavailable(struct uart_dev_s *dev)
 
   /* Only send when the DMA is idle */
 
-  nxsem_wait(&priv->txdmasem);
+  int rv = nxsem_trywait(&priv->txdmasem);
 
-  uart_xmitchars_dma(dev);
+  if (rv == OK)
+    {
+      uart_xmitchars_dma(dev);
+    }
 }
 #endif
 
@@ -1889,12 +1894,12 @@ static void s32k1xx_txint(struct uart_dev_s *dev, bool enable)
   if (enable)
     {
 #ifndef CONFIG_SUPPRESS_SERIAL_INTS
-      priv->ie |= LPUART_CTRL_TCIE;
+      priv->ie |= LPUART_CTRL_TIE;
 #endif
     }
   else
     {
-      priv->ie &= ~LPUART_CTRL_TCIE;
+      priv->ie &= ~LPUART_CTRL_TIE;
     }
 
   regval  = s32k1xx_serialin(priv, S32K1XX_LPUART_CTRL_OFFSET);

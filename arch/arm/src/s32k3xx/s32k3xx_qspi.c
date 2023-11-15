@@ -29,6 +29,7 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
+#include <sys/param.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -74,8 +75,6 @@
 #define ALIGN_MASK        3
 #define ALIGN_UP(n)       (((n)+ALIGN_MASK) & ~ALIGN_MASK)
 #define IS_ALIGNED(n)     (((uint32_t)(n) & ALIGN_MASK) == 0)
-
-#define min(a, b)   (((a) < (b)) ? (a) : (b))
 
 /* LUT entries used for various command sequences                 */
 #define QSPI_LUT_READ        0U /* Quad Output read               */
@@ -152,7 +151,7 @@ static void qspi_resetregisters(void);
 #if defined(CONFIG_DEBUG_SPI_INFO) && defined(CONFIG_DEBUG_GPIO)
 static void     qspi_dumpgpioconfig(const char *msg);
 #else
-# define        qspi_dumpgpioconfig(msg)
+#  define       qspi_dumpgpioconfig(msg)
 #endif
 
 static inline uint32_t qspi_isbusy(void);
@@ -211,6 +210,9 @@ static const struct qspi_ops_s g_qspi0ops =
   .setfrequency      = qspi_setfrequency,
   .setmode           = qspi_setmode,
   .setbits           = qspi_setbits,
+#ifdef CONFIG_QSPI_HWFEATURES
+  .hwfeatures        = NULL,
+#endif
   .command           = qspi_command,
   .memory            = qspi_memory,
   .alloc             = qspi_alloc,
@@ -683,7 +685,7 @@ static int qspi_receive_blocking(struct s32k3xx_qspidev_s *priv,
   uint32_t regval;
   int ret = 0;
 
-  readlen = min(128, remaining);
+  readlen = MIN(128, remaining);
 
   /* Copy sequence in LUT registers */
 
@@ -703,7 +705,7 @@ static int qspi_receive_blocking(struct s32k3xx_qspidev_s *priv,
       regval |= QSPI_MCR_CLR_RXF;
       putreg32(regval, S32K3XX_QSPI_MCR);
 
-      readlen = min(128, remaining);
+      readlen = MIN(128, remaining);
 
 #ifdef CONFIG_S32K3XX_QSPI_INTERRUPTS
       /* enable end of transfer interrupt for asynchronous transfers */
@@ -886,7 +888,7 @@ static int qspi_transmit_blocking(struct s32k3xx_qspidev_s *priv,
   uint32_t regval;
   uint32_t count = UINT32_MAX;
   uint32_t *data = (uint32_t *)meminfo->buffer;
-  uint32_t write_cycle = min(32, ((uint32_t)remaining) >> 2U);
+  uint32_t write_cycle = MIN(32, ((uint32_t)remaining) >> 2U);
   uint32_t timeout = 1000;
   int ret = 0;
 

@@ -26,6 +26,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 #include <assert.h>
@@ -324,7 +325,6 @@ static int  usbhost_cfgdesc(FAR struct usbhost_cdcacm_s *priv,
 /* (Little Endian) Data helpers */
 
 static inline uint16_t usbhost_getle16(FAR const uint8_t *val);
-static inline uint16_t usbhost_getbe16(FAR const uint8_t *val);
 static inline void usbhost_putle16(FAR uint8_t *dest, uint16_t val);
 #ifdef HAVE_CTRL_INTERFACE
 static void usbhost_putle32(FAR uint8_t *dest, uint32_t val);
@@ -425,11 +425,21 @@ static const struct uart_ops_s g_uart_ops =
   usbhost_attach,        /* attach */
   usbhost_detach,        /* detach */
   usbhost_ioctl,         /* ioctl */
-  NULL           ,       /* receive */
+  NULL,                  /* receive */
   usbhost_rxint,         /* rxinit */
   usbhost_rxavailable,   /* rxavailable */
 #ifdef CONFIG_SERIAL_IFLOWCONTROL
   usbhost_rxflowcontrol, /* rxflowcontrol */
+#endif
+#ifdef CONFIG_SERIAL_TXDMA
+  NULL,                  /* dmasend */
+#endif
+#ifdef CONFIG_SERIAL_RXDMA
+  NULL,                  /* dmareceive */
+  NULL,                  /* dmarxfree */
+#endif
+#ifdef CONFIG_SERIAL_TXDMA
+  NULL,                  /* dmatxavail */
 #endif
   NULL,                  /* send */
   usbhost_txint,         /* txinit */
@@ -1223,7 +1233,7 @@ static void usbhost_destroy(FAR void *arg)
   /* Unregister the serial lower half driver */
 
   usbhost_mkdevname(priv, devname);
-#warning Missing logic
+  unregister_driver(devname);
 
   /* Release the device name used by this connection */
 
@@ -1627,25 +1637,6 @@ static inline uint16_t usbhost_getle16(FAR const uint8_t *val)
 }
 
 /****************************************************************************
- * Name: usbhost_getbe16
- *
- * Description:
- *   Get a (possibly unaligned) 16-bit big endian value.
- *
- * Input Parameters:
- *   val - A pointer to the first byte of the big endian value.
- *
- * Returned Value:
- *   A uint16_t representing the whole 16-bit integer value
- *
- ****************************************************************************/
-
-static inline uint16_t usbhost_getbe16(FAR const uint8_t *val)
-{
-  return (uint16_t)val[0] << 8 | (uint16_t)val[1];
-}
-
-/****************************************************************************
  * Name: usbhost_putle16
  *
  * Description:
@@ -1733,7 +1724,7 @@ static int usbhost_alloc_buffers(FAR struct usbhost_cdcacm_s *priv)
                      sizeof(struct cdc_linecoding_s));
   if (ret < 0)
     {
-      uerr("ERROR: DRVR_IOALLOC of line coding failed: %d (%d bytes)\n",
+      uerr("ERROR: DRVR_IOALLOC of line coding failed: %d (%zu bytes)\n",
            ret, sizeof(struct cdc_linecoding_s));
       goto errout;
     }
@@ -2160,7 +2151,7 @@ static int usbhost_disconnected(FAR struct usbhost_class_s *usbclass)
 
   if (priv->intin)
     {
-      int ret = DRVR_CANCEL(hport->drvr, priv->intin);
+      ret = DRVR_CANCEL(hport->drvr, priv->intin);
       if (ret < 0)
         {
          uerr("ERROR: Interrupt IN DRVR_CANCEL failed: %d\n", ret);
@@ -2369,11 +2360,10 @@ static int usbhost_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   int ret = 0;
 
   uinfo("Entry\n");
-  DEBUGASSERT(filep && filep->f_inode);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  uartdev = (FAR struct uart_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  uartdev = inode->i_private;
 
   DEBUGASSERT(uartdev && uartdev->priv);
   priv = (FAR struct usbhost_cdcacm_s *)uartdev->priv;
@@ -2661,11 +2651,10 @@ static bool usbhost_rxflowcontrol(FAR struct uart_dev_s *uartdev,
                                   unsigned int nbuffered, bool upper)
 {
   FAR struct usbhost_cdcacm_s *priv;
-  bool newrts;
   int ret;
 
   DEBUGASSERT(uartdev && uartdev->priv);
-  priv = (FAR struct usbhost_cdcacm_s *)uartdev->priv
+  priv = (FAR struct usbhost_cdcacm_s *)uartdev->priv;
 
   /* Is RX flow control enabled? */
 
@@ -2713,9 +2702,9 @@ static bool usbhost_rxflowcontrol(FAR struct uart_dev_s *uartdev,
           DEBUGASSERT(ret >= 0);
           UNUSED(ret);
         }
-
-      return false;
     }
+
+  return false;
 }
 #endif
 

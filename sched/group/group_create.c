@@ -51,7 +51,7 @@
  * Public Data
  ****************************************************************************/
 
-#if defined(HAVE_GROUP_MEMBERS) || defined(CONFIG_ARCH_ADDRENV)
+#if defined(HAVE_GROUP_MEMBERS)
 /* This is the head of a list of all group members */
 
 FAR struct task_group_s *g_grouphead;
@@ -90,6 +90,8 @@ static inline void group_inherit_identity(FAR struct task_group_s *group)
   DEBUGASSERT(group != NULL);
   group->tg_uid = rgroup->tg_uid;
   group->tg_gid = rgroup->tg_gid;
+  group->tg_euid = rgroup->tg_euid;
+  group->tg_egid = rgroup->tg_egid;
 }
 #else
 #  define group_inherit_identity(group)
@@ -127,13 +129,13 @@ static inline void group_inherit_identity(FAR struct task_group_s *group)
 int group_allocate(FAR struct task_tcb_s *tcb, uint8_t ttype)
 {
   FAR struct task_group_s *group;
-  int ret = -ENOMEM;
+  int ret;
 
   DEBUGASSERT(tcb && !tcb->cmn.group);
 
   /* Allocate the group structure and assign it to the TCB */
 
-  group = (FAR struct task_group_s *)kmm_zalloc(sizeof(struct task_group_s));
+  group = kmm_zalloc(sizeof(struct task_group_s));
   if (!group)
     {
       return -ENOMEM;
@@ -156,6 +158,7 @@ int group_allocate(FAR struct task_tcb_s *tcb, uint8_t ttype)
   group->tg_members = kmm_malloc(GROUP_INITIAL_MEMBERS * sizeof(pid_t));
   if (!group->tg_members)
     {
+      ret = -ENOMEM;
       goto errout_with_group;
     }
 
@@ -231,7 +234,7 @@ errout_with_group:
 void group_initialize(FAR struct task_tcb_s *tcb)
 {
   FAR struct task_group_s *group;
-#if defined(HAVE_GROUP_MEMBERS) || defined(CONFIG_ARCH_ADDRENV)
+#if defined(HAVE_GROUP_MEMBERS)
   irqstate_t flags;
 #endif
 
@@ -261,7 +264,7 @@ void group_initialize(FAR struct task_tcb_s *tcb)
 
   group->tg_nmembers = 1;
 
-#if defined(HAVE_GROUP_MEMBERS) || defined(CONFIG_ARCH_ADDRENV)
+#if defined(HAVE_GROUP_MEMBERS)
   /* Add the initialized entry to the list of groups */
 
   flags = enter_critical_section();

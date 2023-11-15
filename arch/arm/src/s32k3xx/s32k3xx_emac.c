@@ -35,6 +35,8 @@
 #include <debug.h>
 #include <errno.h>
 
+#include <sys/param.h>
+
 #include <arpa/inet.h>
 
 #include <nuttx/wdog.h>
@@ -45,6 +47,7 @@
 #include <nuttx/signal.h>
 #include <nuttx/net/mii.h>
 #include <nuttx/net/phy.h>
+#include <nuttx/net/ip.h>
 #include <nuttx/net/netdev.h>
 
 #ifdef CONFIG_NET_PKT
@@ -71,7 +74,7 @@
 
 /* Memory synchronization */
 
-#define MEMORY_SYNC() //do { ARM_DSB(); ARM_ISB(); } while (0)                                                                                                                                                                                                                                    
+#define MEMORY_SYNC() //do { ARM_DSB(); ARM_ISB(); } while (0)
 
 /* If processing is not done at the interrupt level, then work queue support
  * is required.
@@ -136,10 +139,6 @@
 
 #if ETH_BUFSIZE != OPTIMAL_ETH_BUFSIZE
 #  warning "You are using an incomplete/untested configuration"
-#endif
-
-#ifndef min
-#  define min(a,b) ((a) < (b) ? (a) : (b))
 #endif
 
 /* We need at least one more free buffer than transmit buffers */
@@ -303,7 +302,9 @@
 #  define BOARD_PHY_100BASET(s) 1 /* PHY only supports 100BASE-T1 */
 #  define BOARD_PHY_ISDUPLEX(s) 1 /* PHY only supports fullduplex */
 
-#  define CLAUSE45              1
+#  ifdef CONFIG_NETDEV_IOCTL
+#    define CLAUSE45            1
+#  endif
 #  define MMD1                  1
 #  define MMD1_PMA_STATUS1      1
 #  define MMD1_PS1_RECEIVE_LINK_STATUS (1 << 2)
@@ -1319,7 +1320,7 @@ static int s32k3xx_recvframe(struct s32k3xx_driver_s *priv)
 
                   up_invalidate_dcache((uintptr_t)dev->d_buf,
                                       (uintptr_t)dev->d_buf +
-                                      min(dev->d_len, ALIGNED_BUFSIZE));
+                                      MIN(dev->d_len, ALIGNED_BUFSIZE));
 
                   ninfo("rxhead: %p d_buf: %p d_len: %d\n",
                       priv->rxhead, dev->d_buf, dev->d_len);
@@ -1947,9 +1948,9 @@ static int s32k3xx_ifup_action(struct net_driver_s *dev, bool resetphy)
   uint32_t regval;
   int ret;
 
-  ninfo("Bringing up: %d.%d.%d.%d\n",
-        (int)(dev->d_ipaddr & 0xff), (int)((dev->d_ipaddr >> 8) & 0xff),
-        (int)((dev->d_ipaddr >> 16) & 0xff), (int)(dev->d_ipaddr >> 24));
+  ninfo("Bringing up: %u.%u.%u.%u\n",
+        ip4_addr1(dev->d_ipaddr), ip4_addr2(dev->d_ipaddr),
+        ip4_addr3(dev->d_ipaddr), ip4_addr4(dev->d_ipaddr));
 
   /* Initialize the free buffer list */
 
@@ -2059,9 +2060,9 @@ static int s32k3xx_ifdown(struct net_driver_s *dev)
   struct s32k3xx_driver_s *priv = (struct s32k3xx_driver_s *)dev->d_private;
   irqstate_t flags;
 
-  ninfo("Taking down: %d.%d.%d.%d\n",
-        (int)(dev->d_ipaddr & 0xff), (int)((dev->d_ipaddr >> 8) & 0xff),
-        (int)((dev->d_ipaddr >> 16) & 0xff), (int)(dev->d_ipaddr >> 24));
+  ninfo("Taking down: %u.%u.%u.%u\n",
+        ip4_addr1(dev->d_ipaddr), ip4_addr2(dev->d_ipaddr),
+        ip4_addr3(dev->d_ipaddr), ip4_addr4(dev->d_ipaddr));
 
   /* Flush and disable the Ethernet interrupts at the NVIC */
 
@@ -2278,12 +2279,12 @@ static int s32k3xx_addmac(struct net_driver_s *dev, const uint8_t *mac)
 
   if (hashindex > 31)
     {
-      registeraddress = S32K3XX_ENET_GAUR;
+      registeraddress = S32K3XX_EMAC_MAC_HASH_TABLE_REG1;
       hashindex      -= 32;
     }
   else
     {
-      registeraddress = S32K3XX_ENET_GALR;
+      registeraddress = S32K3XX_EMAC_MAC_HASH_TABLE_REG0;
     }
 
   temp  = getreg32(registeraddress);
@@ -2326,12 +2327,12 @@ static int s32k3xx_rmmac(struct net_driver_s *dev, const uint8_t *mac)
 
   if (hashindex > 31)
     {
-      registeraddress = S32K3XX_ENET_GAUR;
+      registeraddress = S32K3XX_EMAC_MAC_HASH_TABLE_REG1;
       hashindex      -= 32;
     }
   else
     {
-      registeraddress = S32K3XX_ENET_GALR;
+      registeraddress = S32K3XX_EMAC_MAC_HASH_TABLE_REG0;
     }
 
   temp  = getreg32(registeraddress);
@@ -3485,23 +3486,19 @@ int s32k3xx_netinitialize(int intf)
    * b1, 1st octet)
    */
 
-  /* hardcoded offset: todo: need proper header file */
-
   mac    = priv->dev.d_mac.ether.ether_addr_octet;
+  uidl   = getreg32(S32K3XX_UTEST_UID);
+  uidml  = getreg32(S32K3XX_UTEST_UID + 0x4);
+
   uidml |= 0x00000200;
   uidml &= 0x0000feff;
 
-  /* FIXME UTEST DCF records */
-
-  uidml = 0x2211;
-  uidl = 0x66554433;
-
-  mac[5] = (uidml & 0x000000ff);
-  mac[4] = (uidml & 0x0000ff00) >> 8;
-  mac[3] = (uidl &  0x000000ff);
-  mac[2] = (uidl &  0x0000ff00) >> 8;
-  mac[1] = (uidl &  0x00ff0000) >> 16;
-  mac[0] = (uidl &  0xff000000) >> 24;
+  mac[0] = (uidml & 0x0000ff00) >> 8;
+  mac[1] = (uidml & 0x000000ff);
+  mac[2] = (uidl &  0xff000000) >> 24;
+  mac[3] = (uidl &  0x00ff0000) >> 16;
+  mac[4] = (uidl &  0x0000ff00) >> 8;
+  mac[5] = (uidl &  0x000000ff);
 #endif
 
 #ifdef CONFIG_S32K3XX_ENET_PHYINIT

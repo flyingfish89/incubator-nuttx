@@ -155,27 +155,51 @@ int up_backtrace(struct tcb_s *tcb, void **buffer, int size, int skip)
             {
               ret += backtrace(rtcb->stack_base_ptr,
                                rtcb->stack_base_ptr + rtcb->adj_stack_size,
-                               (void *)rtcb->xcp.regs[REG_FP],
-                               (void *)rtcb->xcp.regs[REG_EPC],
+                               (void *)CURRENT_REGS[REG_FP],
+                               (void *)CURRENT_REGS[REG_EPC],
                                &buffer[ret], size - ret, &skip);
             }
         }
       else
         {
-          ret = backtrace(rtcb->stack_base_ptr,
-                          rtcb->stack_base_ptr + rtcb->adj_stack_size,
-                          (void *)getfp(), NULL, buffer, size, &skip);
+#ifdef CONFIG_ARCH_KERNEL_STACK
+          if (rtcb->xcp.ustkptr != NULL)
+            {
+              ret = backtrace(rtcb->stack_base_ptr,
+                              rtcb->stack_base_ptr + rtcb->adj_stack_size,
+                              (void *)*(rtcb->xcp.ustkptr + 1), NULL,
+                              buffer, size, &skip);
+            }
+          else
+#endif
+            {
+              ret = backtrace(rtcb->stack_base_ptr,
+                              rtcb->stack_base_ptr + rtcb->adj_stack_size,
+                              (void *)getfp(), NULL, buffer, size, &skip);
+            }
         }
     }
   else
     {
       flags = enter_critical_section();
 
-      ret = backtrace(tcb->stack_base_ptr,
-                      tcb->stack_base_ptr + tcb->adj_stack_size,
-                      (void *)tcb->xcp.regs[REG_FP],
-                      (void *)tcb->xcp.regs[REG_EPC],
-                      buffer, size, &skip);
+#ifdef CONFIG_ARCH_KERNEL_STACK
+      if (tcb->xcp.ustkptr != NULL)
+        {
+          ret = backtrace(tcb->stack_base_ptr,
+                          tcb->stack_base_ptr + tcb->adj_stack_size,
+                          (void *)*(tcb->xcp.ustkptr + 1), NULL,
+                          buffer, size, &skip);
+        }
+      else
+#endif
+        {
+          ret = backtrace(tcb->stack_base_ptr,
+                          tcb->stack_base_ptr + tcb->adj_stack_size,
+                          (void *)tcb->xcp.regs[REG_FP],
+                          (void *)tcb->xcp.regs[REG_EPC],
+                          buffer, size, &skip);
+        }
 
       leave_critical_section(flags);
     }

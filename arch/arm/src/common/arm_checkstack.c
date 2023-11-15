@@ -30,6 +30,7 @@
 #include <assert.h>
 #include <debug.h>
 
+#include <nuttx/addrenv.h>
 #include <nuttx/arch.h>
 #include <nuttx/board.h>
 
@@ -171,7 +172,7 @@ void arm_stack_color(void *stackbase, size_t nbytes)
     }
 
   stkend = STACK_ALIGN_DOWN(stkend);
-  nwords = (stkend - (uintptr_t)stackbase) >> 2;
+  nwords = (stkend - (uintptr_t)stkptr) >> 2;
 
   /* Set the entire stack to the coloration value */
 
@@ -202,22 +203,20 @@ size_t up_check_tcbstack(struct tcb_s *tcb)
   size_t size;
 
 #ifdef CONFIG_ARCH_ADDRENV
-  save_addrenv_t oldenv;
-  bool saved = false;
+  struct addrenv_s *oldenv;
 
-  if ((tcb->flags & TCB_FLAG_TTYPE_MASK) != TCB_FLAG_TTYPE_KERNEL)
+  if (tcb->addrenv_own != NULL)
     {
-      up_addrenv_select(&tcb->group->tg_addrenv, &oldenv);
-      saved = true;
+      addrenv_select(tcb->addrenv_own, &oldenv);
     }
 #endif
 
   size = arm_stack_check(tcb->stack_base_ptr, tcb->adj_stack_size);
 
 #ifdef CONFIG_ARCH_ADDRENV
-  if (saved)
+  if (tcb->addrenv_own != NULL)
     {
-      up_addrenv_restore(&oldenv);
+      addrenv_restore(oldenv);
     }
 #endif
 

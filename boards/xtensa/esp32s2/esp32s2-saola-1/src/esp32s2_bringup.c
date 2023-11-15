@@ -58,12 +58,30 @@
 #  include "esp32s2_rt_timer.h"
 #endif
 
+#ifdef CONFIG_ESP32S2_EFUSE
+#  include "esp32s2_efuse.h"
+#endif
+
+#ifdef CONFIG_ESP32S2_LEDC
+#  include "esp32s2_ledc.h"
+#endif
+
 #ifdef CONFIG_WATCHDOG
 #  include "esp32s2_board_wdt.h"
 #endif
 
 #ifdef CONFIG_SENSORS_MAX6675
 #  include "esp32s2_max6675.h"
+#endif
+
+#ifdef CONFIG_SPI_DRIVER
+#  include "esp32s2_spi.h"
+#  include "esp32s2_board_spidev.h"
+#endif
+
+#ifdef CONFIG_SPI_SLAVE_DRIVER
+#  include "esp32s2_spi.h"
+#  include "esp32s2_board_spislavedev.h"
 #endif
 
 #include "esp32s2-saola-1.h"
@@ -111,6 +129,14 @@ int esp32s2_bringup(void)
     }
 #endif
 
+#if defined(CONFIG_ESP32S2_EFUSE)
+  ret = esp32s2_efuse_initialize("/dev/efuse");
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to init EFUSE: %d\n", ret);
+    }
+#endif
+
 #ifdef CONFIG_WATCHDOG
   /* Configure watchdog timer */
 
@@ -121,12 +147,55 @@ int esp32s2_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_ESP32S2_LEDC
+  ret = esp32s2_pwm_setup();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: esp32s2_pwm_setup() failed: %d\n", ret);
+    }
+#endif /* CONFIG_ESP32S2_LEDC */
+
+#ifdef CONFIG_ESP32S2_SPIFLASH
+  ret = board_spiflash_init();
+  if (ret)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize SPI Flash\n");
+    }
+#endif
+
 #ifdef CONFIG_DEV_GPIO
   ret = esp32s2_gpio_init();
   if (ret < 0)
     {
       syslog(LOG_ERR, "Failed to initialize GPIO Driver: %d\n", ret);
       return ret;
+    }
+#endif
+
+#ifdef CONFIG_ESP32S2_SPI2
+# ifdef CONFIG_SPI_DRIVER
+  ret = board_spidev_initialize(ESP32S2_SPI2);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "Failed to initialize SPI%d driver: %d\n",
+             ESP32S2_SPI2, ret);
+    }
+# elif defined(CONFIG_SPI_SLAVE_DRIVER) && defined(CONFIG_ESP32S2_SPI2_SLAVE)
+  ret = board_spislavedev_initialize(ESP32S2_SPI2);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "Failed to initialize SPI%d Slave driver: %d\n",
+              ESP32S2_SPI2, ret);
+    }
+# endif
+#endif
+
+#if defined(CONFIG_SPI_SLAVE_DRIVER) && defined(CONFIG_ESP32S2_SPI3_SLAVE)
+  ret = board_spislavedev_initialize(ESP32S2_SPI3);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "Failed to initialize SPI%d Slave driver: %d\n",
+              ESP32S2_SPI3, ret);
     }
 #endif
 
@@ -207,6 +276,17 @@ int esp32s2_bringup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "Failed to initialize I2C driver: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_ESP32S2_TWAI
+
+  /* Initialize TWAI and register the TWAI driver. */
+
+  ret = board_twai_setup();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: board_twai_setup failed: %d\n", ret);
     }
 #endif
 

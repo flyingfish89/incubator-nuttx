@@ -25,6 +25,7 @@
 #include <nuttx/config.h>
 
 #include <sys/mount.h>
+#include <sys/param.h>
 
 #include <stdbool.h>
 #include <stdlib.h>
@@ -51,8 +52,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-#define ARRAYSIZE(x)                (sizeof((x)) / sizeof((x)[0]))
 
 #define PARTITION_LABEL_LEN         16
 
@@ -183,13 +182,12 @@ static int init_ota_partitions(void)
   int ret = 0;
   char path[PARTITION_LABEL_LEN + 1];
 
-  for (i = 0; i < ARRAYSIZE(g_ota_partition_table); ++i)
+  for (i = 0; i < nitems(g_ota_partition_table); ++i)
     {
       const struct ota_partition_s *part = &g_ota_partition_table[i];
       mtd = progmem_alloc_mtdpart(part->offset, part->size);
 
-      strncpy(path, (char *)part->devpath, PARTITION_LABEL_LEN);
-      path[PARTITION_LABEL_LEN] = '\0';
+      strlcpy(path, (char *)part->devpath, PARTITION_LABEL_LEN);
 
       finfo("INFO: [label]:   %s\n", path);
       finfo("INFO: [offset]:  0x%08" PRIx32 "\n", part->offset);

@@ -28,6 +28,7 @@
 
 #include <nuttx/config.h>
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -66,16 +67,6 @@
 #if !defined(CONFIG_SAM34_OSC32K) && !defined(CONFIG_SAM34_RC32K)
 #  error This SLCD driver requires that either CONFIG_SAM34_OSC32K or
 #  error CONFIG_SAM34_RC32K be selected in the board configuration
-#endif
-
-/* The ever-present MIN/MAX macros ******************************************/
-
-#ifndef MIN
-#  define MIN(a,b) (((a) < (b)) ? (a) : (b))
-#endif
-
-#ifndef MAX
-#  define MAX(a,b) (((a) > (b)) ? (a) : (b))
 #endif
 
 /* LCD **********************************************************************/
@@ -882,7 +873,7 @@ static ssize_t slcd_write(struct file *filep,
   /* Decode and process every byte in the input buffer */
 
   options = 0;
-  while ((result = slcd_decode(&instream.public,
+  while ((result = slcd_decode(&instream.common,
                                &state, &ch, &count)) != SLCDRET_EOF)
     {
       lcdinfo("slcd_decode returned result=%d char=%d count=%d\n",

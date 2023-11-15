@@ -33,6 +33,7 @@
 #include <nuttx/net/net.h>
 
 #include "devif/devif.h"
+#include "netdev/netdev.h"
 #include "arp/arp.h"
 #include "can/can.h"
 #include "tcp/tcp.h"
@@ -46,6 +47,8 @@
 #include "mld/mld.h"
 #include "ipforward/ipforward.h"
 #include "sixlowpan/sixlowpan.h"
+#include "ipfrag/ipfrag.h"
+#include "inet/inet.h"
 
 /****************************************************************************
  * Private Types
@@ -206,17 +209,25 @@ static int devif_poll_pkt_connections(FAR struct net_driver_s *dev,
 
   while (!bstop && (pkt_conn = pkt_nextconn(pkt_conn)))
     {
-      /* Perform the packet TX poll */
+      /* Skip packet connections that are bound to other polling devices */
 
-      pkt_poll(dev, pkt_conn);
+      if (dev->d_ifindex == pkt_conn->ifindex)
+        {
+          /* Perform the packet TX poll */
 
-      /* Perform any necessary conversions on outgoing packets */
+          pkt_poll(dev, pkt_conn);
 
-      devif_packet_conversion(dev, DEVIF_PKT);
+          /* Perform any necessary conversions on outgoing packets */
 
-      /* Call back into the driver */
+          devif_packet_conversion(dev, DEVIF_PKT);
 
-      bstop = callback(dev);
+          /* Call back into the driver */
+
+          if (dev->d_len > 0)
+            {
+              bstop = callback(dev);
+            }
+        }
     }
 
   return bstop;
@@ -258,7 +269,10 @@ static int devif_poll_can_connections(FAR struct net_driver_s *dev,
 
           /* Call back into the driver */
 
-          bstop = callback(dev);
+          if (dev->d_len > 0)
+            {
+              bstop = callback(dev);
+            }
         }
     }
 
@@ -297,7 +311,10 @@ static int devif_poll_bluetooth_connections(FAR struct net_driver_s *dev,
 
       /* Call back into the driver */
 
-      bstop = callback(dev);
+      if (dev->d_len > 0)
+        {
+          bstop = callback(dev);
+        }
     }
 
   return bstop;
@@ -335,7 +352,10 @@ static int devif_poll_ieee802154_connections(FAR struct net_driver_s *dev,
 
       /* Call back into the driver */
 
-      bstop = callback(dev);
+      if (dev->d_len > 0)
+        {
+          bstop = callback(dev);
+        }
     }
 
   return bstop;
@@ -613,7 +633,83 @@ static inline int devif_poll_tcp_connections(FAR struct net_driver_s *dev,
   return bstop;
 }
 #else
-# define devif_poll_tcp_connections(dev, callback) (0)
+#  define devif_poll_tcp_connections(dev, callback) (0)
+#endif
+
+/****************************************************************************
+ * Name: devif_poll_ipfrag
+ *
+ * Description:
+ *   Poll all ip fragments for available packets to send.
+ *
+ * Input Parameters:
+ *   dev - NIC Device instance.
+ *   callback - the actual sending API provided by each NIC driver.
+ *
+ * Returned Value:
+ *   Zero indicated the polling will continue, else stop the polling.
+ *
+ * Assumptions:
+ *   This function is called from the MAC device driver with the network
+ *   locked.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NET_IPFRAG
+static int devif_poll_ipfrag(FAR struct net_driver_s *dev,
+                             devif_poll_callback_t callback)
+{
+  FAR struct iob_s *frag;
+  bool reused = false;
+  int bstop = false;
+
+  while (!bstop)
+    {
+      /* Dequeue outgoing fragment from dev->d_fragout */
+
+      frag = iob_remove_queue(&dev->d_fragout);
+      if (frag == NULL)
+        {
+          break;
+        }
+
+      /* Frag buffer could be reused for other protocols */
+
+      reused = true;
+
+      /* Replace original iob */
+
+      netdev_iob_replace(dev, frag);
+
+      /* build L2 headers */
+
+      devif_out(dev);
+
+      /* Call back into the driver */
+
+      if (dev->d_len > 0)
+        {
+          bstop = callback(dev);
+        }
+    }
+
+  /* Notify the device driver that ip fragments is available. */
+
+  if (iob_peek_queue(&dev->d_fragout) != NULL)
+    {
+      netdev_txnotify_dev(dev);
+    }
+
+  /* Reuse iob buffer */
+
+  if (!bstop && reused)
+    {
+      iob_update_pktlen(dev->d_iob, 0, false);
+      netdev_iob_prepare(dev, true, 0);
+    }
+
+  return bstop;
+}
 #endif
 
 /****************************************************************************
@@ -654,10 +750,19 @@ static int devif_poll_connections(FAR struct net_driver_s *dev,
    * action.
    */
 
-#ifdef CONFIG_NET_ARP_SEND
-  /* Check for pending ARP requests */
+#ifdef CONFIG_NET_IPFRAG
+  /* Traverse all of ip fragments for available packets to transfer */
 
-  bstop = arp_poll(dev, callback);
+  bstop = devif_poll_ipfrag(dev, callback);
+  if (!bstop)
+#endif
+#ifdef CONFIG_NET_ARP_SEND
+    {
+      /* Check for pending ARP requests */
+
+      bstop = arp_poll(dev, callback);
+    }
+
   if (!bstop)
 #endif
 #ifdef CONFIG_NET_PKT
@@ -821,13 +926,6 @@ static int devif_iob_poll(FAR struct net_driver_s *dev,
 {
   int bstop;
 
-  /* Device polling, prepare iob buffer */
-
-  if (netdev_iob_prepare(dev, false, 0) != OK)
-    {
-      return true;
-    }
-
   /* Perform all connections poll */
 
   bstop = devif_poll_connections(dev, callback);
@@ -920,15 +1018,6 @@ int devif_poll(FAR struct net_driver_s *dev, devif_poll_callback_t callback)
 
   do
     {
-      /* Device polling, prepare iob buffer */
-
-      if (netdev_iob_prepare(dev, false, 0) != OK)
-        {
-          nwarn("WARNING: IOB Prepare failed for dev %s!\n", dev->d_ifname);
-          bstop = true;
-          break;
-        }
-
       /* Perform all connections poll */
 
       bstop = devif_poll_connections(dev, devif_poll_callback);
@@ -936,13 +1025,7 @@ int devif_poll(FAR struct net_driver_s *dev, devif_poll_callback_t callback)
         {
           /* Copy iob to flat buffer */
 
-          iob_copyout(buf + llhdrlen,
-                      dev->d_iob, dev->d_len, 0);
-
-          /* Copy l2 header (arp out) */
-
-          memcpy(buf, dev->d_iob->io_data +
-                 (CONFIG_NET_LL_GUARDSIZE - llhdrlen), llhdrlen);
+          iob_copyout(buf, dev->d_iob, dev->d_len, -llhdrlen);
 
           /* Restore flat buffer pointer */
 
@@ -1064,10 +1147,88 @@ int devif_poll_out(FAR struct net_driver_s *dev,
 
   if (callback)
     {
+#ifdef CONFIG_NET_IPFRAG
+      if (ip_fragout(dev) != OK)
+        {
+          netdev_iob_release(dev);
+          return 1;
+        }
+      else if (iob_peek_queue(&dev->d_fragout) != NULL)
+        {
+          return devif_poll_ipfrag(dev, callback);
+        }
+#endif
+
       return callback(dev);
     }
 
   return 0;
+}
+
+/****************************************************************************
+ * Name: devif_get_mtu
+ *
+ * Description:
+ *   Get mtu
+ *
+ * Parameters:
+ *   dev   Ethernet driver device structure
+ *
+ * Return:
+ *   return (Maximum packet size - Link layer header size),
+ *   if PMTUD enable return pmtu
+ ****************************************************************************/
+
+uint16_t devif_get_mtu(FAR struct net_driver_s *dev)
+{
+  if (dev->d_iob == NULL || dev->d_len == 0)
+    {
+      return dev->d_pktsize - dev->d_llhdrlen;
+    }
+
+#if (defined(CONFIG_NET_IPv6) && \
+    defined(CONFIG_NET_ICMPv6) && \
+    !defined(CONFIG_NET_ICMPv6_NO_STACK) && \
+    CONFIG_NET_ICMPv6_PMTU_ENTRIES > 0)
+  if (IFF_IS_IPv6(dev->d_flags))
+    {
+      FAR struct ipv6_hdr_s *ipv6 = IPv6BUF;
+
+      if (!net_ipv6addr_cmp(ipv6->destipaddr, g_ipv6_unspecaddr))
+        {
+          FAR struct icmpv6_pmtu_entry *entry =
+            icmpv6_find_pmtu_entry(ipv6->destipaddr);
+
+          if (entry != NULL)
+            {
+              return entry->pmtu;
+            }
+        }
+    }
+#  endif
+
+#if (defined(CONFIG_NET_IPv4) && \
+    defined(CONFIG_NET_ICMP) && \
+    !defined(CONFIG_NET_ICMP_NO_STACK) && \
+    CONFIG_NET_ICMP_PMTU_ENTRIES > 0)
+  if (IFF_IS_IPv4(dev->d_flags))
+    {
+      FAR struct ipv4_hdr_s *ipv4 = IPv4BUF;
+
+      if (!net_ipv4addr_cmp(ipv4->destipaddr, INADDR_ANY))
+        {
+          FAR struct icmp_pmtu_entry *entry =
+            icmpv4_find_pmtu_entry(net_ip4addr_conv32(ipv4->destipaddr));
+
+          if (entry != NULL)
+            {
+              return entry->pmtu;
+            }
+        }
+    }
+#  endif
+
+  return dev->d_pktsize - dev->d_llhdrlen;
 }
 
 #endif /* CONFIG_NET */

@@ -40,6 +40,14 @@
 #include "littlefs/lfs_util.h"
 
 /****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+#ifndef CONFIG_C99_BOOL
+#  error littlefs requires CONFIG_C99_BOOL to be selected
+#endif
+
+/****************************************************************************
  * Private Types
  ****************************************************************************/
 
@@ -132,7 +140,7 @@ static int     littlefs_stat(FAR struct inode *mountpt,
  * with any compiler.
  */
 
-const struct mountpt_operations littlefs_operations =
+const struct mountpt_operations g_littlefs_operations =
 {
   littlefs_open,          /* open */
   littlefs_close,         /* close */
@@ -1088,15 +1096,23 @@ static int littlefs_bind(FAR struct inode *driver, FAR const void *data,
   fs->cfg.erase          = littlefs_erase_block;
   fs->cfg.sync           = littlefs_sync_block;
   fs->cfg.read_size      = fs->geo.blocksize *
-                           CONFIG_FS_LITTLEFS_BLOCK_FACTOR;
-  fs->cfg.prog_size      = fs->geo.blocksize;
-  fs->cfg.block_size     = fs->geo.erasesize;
-  fs->cfg.block_count    = fs->geo.neraseblocks;
+                           CONFIG_FS_LITTLEFS_READ_SIZE_FACTOR;
+  fs->cfg.prog_size      = fs->geo.blocksize *
+                           CONFIG_FS_LITTLEFS_PROGRAM_SIZE_FACTOR;
+  fs->cfg.block_size     = fs->geo.erasesize *
+                           CONFIG_FS_LITTLEFS_BLOCK_SIZE_FACTOR;
+  fs->cfg.block_count    = fs->geo.neraseblocks /
+                           CONFIG_FS_LITTLEFS_BLOCK_SIZE_FACTOR;
   fs->cfg.block_cycles   = CONFIG_FS_LITTLEFS_BLOCK_CYCLE;
   fs->cfg.cache_size     = fs->geo.blocksize *
-                           CONFIG_FS_LITTLEFS_BLOCK_FACTOR;
+                           CONFIG_FS_LITTLEFS_CACHE_SIZE_FACTOR;
+
+#if CONFIG_FS_LITTLEFS_LOOKAHEAD_SIZE == 0
   fs->cfg.lookahead_size = lfs_min(lfs_alignup(fs->cfg.block_count, 64) / 8,
                                    fs->cfg.read_size);
+#else
+  fs->cfg.lookahead_size = CONFIG_FS_LITTLEFS_LOOKAHEAD_SIZE;
+#endif
 
   /* Then get information about the littlefs filesystem on the devices
    * managed by this driver.
@@ -1226,7 +1242,6 @@ static int littlefs_statfs(FAR struct inode *mountpt, FAR struct statfs *buf)
 
   /* Return something for the file system description */
 
-  memset(buf, 0, sizeof(*buf));
   buf->f_type    = LITTLEFS_SUPER_MAGIC;
   buf->f_namelen = LFS_NAME_MAX;
   buf->f_bsize   = fs->cfg.block_size;

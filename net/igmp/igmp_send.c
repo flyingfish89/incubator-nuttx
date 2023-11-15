@@ -109,6 +109,13 @@ void igmp_send(FAR struct net_driver_s *dev, FAR struct igmp_group_s *group,
 
   ninfo("msgid: %02x destipaddr: %08x\n", msgid, (int)*destipaddr);
 
+  /* Prepare device buffer */
+
+  if (netdev_iob_prepare(dev, false, 0) != OK)
+    {
+      return;
+    }
+
   /* The IGMP header immediately follows the IP header */
 
   iphdrlen          = IPv4_HDRLEN + RASIZE;
@@ -122,7 +129,7 @@ void igmp_send(FAR struct net_driver_s *dev, FAR struct igmp_group_s *group,
 
   /* Update device buffer length */
 
-  iob_update_pktlen(dev->d_iob, dev->d_len);
+  iob_update_pktlen(dev->d_iob, dev->d_len, false);
 
   /* The total size of the data is the size of the IGMP header */
 
@@ -135,7 +142,7 @@ void igmp_send(FAR struct net_driver_s *dev, FAR struct igmp_group_s *group,
   opt.len = sizeof(uint32_t);
 
   ipv4_build_header(IPv4BUF, dev->d_len, IP_PROTO_IGMP,
-                    &dev->d_ipaddr, destipaddr, IGMP_TTL, &opt);
+                    &dev->d_ipaddr, destipaddr, IGMP_TTL, 0, &opt);
 
   /* Set up the IGMP message */
 

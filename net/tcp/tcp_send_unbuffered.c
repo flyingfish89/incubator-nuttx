@@ -102,48 +102,6 @@ struct send_s
  ****************************************************************************/
 
 /****************************************************************************
- * Name: tcpsend_ipselect
- *
- * Description:
- *   If both IPv4 and IPv6 support are enabled, then we will need to select
- *   which one to use when generating the outgoing packet.  If only one
- *   domain is selected, then the setup is already in place and we need do
- *   nothing.
- *
- * Input Parameters:
- *   dev    - The structure of the network driver that caused the event
- *   pstate - sendto state structure
- *
- * Returned Value:
- *   None
- *
- * Assumptions:
- *   The network is locked.
- *
- ****************************************************************************/
-
-#ifdef NEED_IPDOMAIN_SUPPORT
-static inline void tcpsend_ipselect(FAR struct net_driver_s *dev,
-                                    FAR struct tcp_conn_s *conn)
-{
-  /* Which domain does the socket support */
-
-  if (conn->domain == PF_INET)
-    {
-      /* Select the IPv4 domain */
-
-      tcp_ipv4_select(dev);
-    }
-  else /* if (conn->domain == PF_INET6) */
-    {
-      /* Select the IPv6 domain */
-
-      tcp_ipv6_select(dev);
-    }
-}
-#endif
-
-/****************************************************************************
  * Name: tcpsend_eventhandler
  *
  * Description:
@@ -168,6 +126,7 @@ static uint16_t tcpsend_eventhandler(FAR struct net_driver_s *dev,
 {
   FAR struct send_s *pstate = pvpriv;
   FAR struct tcp_conn_s *conn;
+  int ret;
 
   DEBUGASSERT(pstate != NULL);
 
@@ -319,14 +278,18 @@ static uint16_t tcpsend_eventhandler(FAR struct net_driver_s *dev,
        * place and we need do nothing.
        */
 
-      tcpsend_ipselect(dev, conn);
+      tcp_ip_select(conn);
 #endif
       /* Then set-up to send that amount of data. (this won't actually
        * happen until the polling cycle completes).
        */
 
-      devif_send(dev, &pstate->snd_buffer[pstate->snd_acked],
-                 sndlen, tcpip_hdrsize(conn));
+      ret = devif_send(dev, &pstate->snd_buffer[pstate->snd_acked],
+                       sndlen, tcpip_hdrsize(conn));
+      if (ret <= 0)
+        {
+          goto end_wait;
+        }
 
       /* Continue waiting */
 
@@ -401,17 +364,17 @@ static uint16_t tcpsend_eventhandler(FAR struct net_driver_s *dev,
            * place and we need do nothing.
            */
 
-          tcpsend_ipselect(dev, conn);
+          tcp_ip_select(conn);
 #endif
           /* Then set-up to send that amount of data. (this won't actually
            * happen until the polling cycle completes).
            */
 
-          devif_send(dev, &pstate->snd_buffer[pstate->snd_sent],
-                     sndlen, tcpip_hdrsize(conn));
-          if (dev->d_sndlen == 0)
+          ret = devif_send(dev, &pstate->snd_buffer[pstate->snd_sent],
+                           sndlen, tcpip_hdrsize(conn));
+          if (ret <= 0)
             {
-              return flags;
+              goto end_wait;
             }
 
           /* Update the amount of data sent (but not necessarily ACKed) */
@@ -527,7 +490,7 @@ ssize_t psock_tcp_send(FAR struct socket *psock,
       goto errout;
     }
 
-  conn = (FAR struct tcp_conn_s *)psock->s_conn;
+  conn = psock->s_conn;
 
   /* Check early if this is an un-connected socket, if so, then
    * return -ENOTCONN. Note, we will have to check this again, as we can't
@@ -562,7 +525,7 @@ ssize_t psock_tcp_send(FAR struct socket *psock,
     {
       /* Make sure that the IP address mapping is in the Neighbor Table */
 
-      ret = icmpv6_neighbor(conn->u.ipv6.raddr);
+      ret = icmpv6_neighbor(NULL, conn->u.ipv6.raddr);
     }
 #endif /* CONFIG_NET_ICMPv6_NEIGHBOR */
 
@@ -634,14 +597,14 @@ ssize_t psock_tcp_send(FAR struct socket *psock,
           tcp_send_txnotify(psock, conn);
 
           /* Wait for the send to complete or an error to occur:  NOTES:
-           * net_lockedwait will also terminate if a signal is received.
+           * net_sem_wait will also terminate if a signal is received.
            */
 
           for (; ; )
             {
               uint32_t acked = state.snd_acked;
 
-              ret = net_timedwait(&state.snd_sem,
+              ret = net_sem_timedwait(&state.snd_sem,
                                   _SO_TIMEOUT(conn->sconn.s_sndtimeo));
               if (ret != -ETIMEDOUT || acked == state.snd_acked)
                 {
@@ -673,9 +636,9 @@ ssize_t psock_tcp_send(FAR struct socket *psock,
       goto errout;
     }
 
-  /* If net_timedwait failed, then we were probably reawakened by a signal.
-   * In this case, net_timedwait will have returned negated errno
-   * appropriately.
+  /* If net_sem_timedwait failed, then we were probably reawakened by a
+   * signal. In this case, net_sem_timedwait will have returned negated
+   * errno appropriately.
    */
 
   if (ret < 0)

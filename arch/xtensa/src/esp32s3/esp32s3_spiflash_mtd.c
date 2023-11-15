@@ -123,7 +123,8 @@ static const struct esp32s3_mtd_dev_s g_esp32s3_spiflash =
 #endif
             .name   = "esp32s3_spiflash"
           },
-  .data = &rom_spiflash_legacy_data,
+  .data = (const struct spiflash_legacy_data_s **)
+          (&rom_spiflash_legacy_data),
 };
 
 static const struct esp32s3_mtd_dev_s g_esp32s3_spiflash_encrypt =
@@ -140,7 +141,8 @@ static const struct esp32s3_mtd_dev_s g_esp32s3_spiflash_encrypt =
 #endif
             .name   = "esp32s3_spiflash_encrypt"
           },
-  .data = &rom_spiflash_legacy_data,
+  .data = (const struct spiflash_legacy_data_s **)
+          (&rom_spiflash_legacy_data),
 };
 
 /* Ensure exclusive access to the driver */
@@ -620,6 +622,8 @@ static int esp32s3_ioctl(struct mtd_dev_s *dev, int cmd,
           struct mtd_geometry_s *geo = (struct mtd_geometry_s *)arg;
           if (geo)
             {
+              memset(geo, 0, sizeof(*geo));
+
               geo->blocksize    = MTD_BLK_SIZE;
               geo->erasesize    = MTD_ERASE_SIZE;
               geo->neraseblocks = MTD_SIZE(priv) / MTD_ERASE_SIZE;

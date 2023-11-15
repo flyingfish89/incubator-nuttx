@@ -405,7 +405,7 @@ unsigned int iob_get_queue_size(FAR struct iob_queue_s *queue);
  ****************************************************************************/
 
 int iob_copyin(FAR struct iob_s *iob, FAR const uint8_t *src,
-               unsigned int len, unsigned int offset, bool throttled);
+               unsigned int len, int offset, bool throttled);
 
 /****************************************************************************
  * Name: iob_trycopyin
@@ -418,7 +418,7 @@ int iob_copyin(FAR struct iob_s *iob, FAR const uint8_t *src,
  ****************************************************************************/
 
 int iob_trycopyin(FAR struct iob_s *iob, FAR const uint8_t *src,
-                  unsigned int len, unsigned int offset, bool throttled);
+                  unsigned int len, int offset, bool throttled);
 
 /****************************************************************************
  * Name: iob_copyout
@@ -430,7 +430,7 @@ int iob_trycopyin(FAR struct iob_s *iob, FAR const uint8_t *src,
  ****************************************************************************/
 
 int iob_copyout(FAR uint8_t *dest, FAR const struct iob_s *iob,
-                unsigned int len, unsigned int offset);
+                unsigned int len, int offset);
 
 /****************************************************************************
  * Name: iob_tailroom
@@ -476,8 +476,8 @@ int iob_clone(FAR struct iob_s *iob1, FAR struct iob_s *iob2,
  ****************************************************************************/
 
 int iob_clone_partial(FAR struct iob_s *iob1, unsigned int len,
-                      unsigned int offset1, FAR struct iob_s *iob2,
-                      unsigned int offset2, bool throttled, bool block);
+                      int offset1, FAR struct iob_s *iob2,
+                      int offset2, bool throttled, bool block);
 
 /****************************************************************************
  * Name: iob_concat
@@ -571,14 +571,16 @@ void iob_reserve(FAR struct iob_s *iob, unsigned int reserved);
  *
  * Description:
  *   This function will update packet length of the iob, it will be
- *   trimmed if the length of the iob chain is greater than the current
- *   length.
- *   This function will not grow the iob link, any grow operation should
- *   be implemented through iob_copyin()/iob_trycopyin().
+ *   trimmed if the current length of the iob chain is greater than the
+ *   new length, and will be grown if less than new length.
+ *
+ * Returned Value:
+ *   The new effective iob packet length, or a negated errno value on error.
  *
  ****************************************************************************/
 
-void iob_update_pktlen(FAR struct iob_s *iob, unsigned int pktlen);
+int iob_update_pktlen(FAR struct iob_s *iob, unsigned int pktlen,
+                      bool throttled);
 
 /****************************************************************************
  * Name: iob_count

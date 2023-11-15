@@ -27,6 +27,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <sys/param.h>
 #include <debug.h>
 #include <assert.h>
 #include <errno.h>
@@ -40,10 +41,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-#ifndef MIN
-#  define MIN(a,b) ((a) < (b) ? (a) : (b))
-#endif
 
 #define ROTL_32(x,n) (((x) << (n)) | ((x) >> (32 - (n))))
 #define ROTR_32(x,n) (((x) >> (n)) | ((x) << (32 - (n))))
@@ -216,7 +213,7 @@ static void addentropy(FAR const uint32_t *buf, size_t n, bool inc_new)
 
 static void initentropy(FAR blake2s_state *S)
 {
-#ifdef CONFIG_SCHED_CPULOAD
+#ifndef CONFIG_SCHED_CPULOAD_NONE
   struct cpuload_s load;
 #endif
   uint32_t tmp;
@@ -234,7 +231,7 @@ static void initentropy(FAR blake2s_state *S)
 
   tmp = sizeof(entropy_pool.pool);
   tmp <<= 27;
-#ifdef CONFIG_SCHED_CPULOAD
+#ifndef CONFIG_SCHED_CPULOAD_NONE
   clock_cpuload(0, &load);
   tmp += load.total ^ ROTL_32(load.active, 23);
 #endif

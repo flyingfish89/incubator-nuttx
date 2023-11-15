@@ -237,9 +237,7 @@
  * headers
  */
 
-#define ETHBUF ((FAR struct eth_hdr_s *)\
-                &dev->d_iob->io_data[CONFIG_NET_LL_GUARDSIZE - \
-                                     NET_LL_HDRLEN(dev)])
+#define ETHBUF ((FAR struct eth_hdr_s *)NETLLBUF)
 
 /****************************************************************************
  * Public Type Definitions
@@ -434,31 +432,40 @@ uint16_t devif_conn_event(FAR struct net_driver_s *dev, uint16_t flags,
 uint16_t devif_dev_event(FAR struct net_driver_s *dev, uint16_t flags);
 
 /****************************************************************************
- * Send data on the current connection.
+ * Name: devif_send
  *
- * This function is used to send out a single segment of TCP data.  Only
- * socket logic that have been invoked by the lower level for event
- * processing can send data.
+ * Description:
+ *   Send data on the current connection.
  *
- * The amount of data that actually is sent out after a call to this
- * function is determined by the maximum amount of data TCP allows. The
- * network will automatically crop the data so that only the appropriate
- * amount of data is sent. The mss field of the TCP connection structure
- * can be used to determine the amount of data that actually will be sent.
+ *   This function is used to send out a single segment of TCP data.  Only
+ *   socket logic that have been invoked by the lower level for event
+ *   processing can send data.
+ *
+ *   The amount of data that actually is sent out after a call to this
+ *   function is determined by the maximum amount of data TCP allows. The
+ *   network will automatically crop the data so that only the appropriate
+ *   amount of data is sent. The mss field of the TCP connection structure
+ *   can be used to determine the amount of data that actually will be sent.
  *
  * Note:  This function does not guarantee that the sent data will
  * arrive at the destination.  If the data is lost in the network, the
  * TCP socket layer will be invoked with the TCP_REXMIT flag set.  The
  * socket layer will then have to resend the data using this function.
  *
- * data A pointer to the data which is to be sent.
+ * Input Parameters:
+ *   dev - The network device state structure associated with the network
+ *     device that initiated the callback event.
+ *   buf - A pointer to the data which is to be sent.
+ *   len - The maximum amount of data bytes to be sent.
+ *   offset - Offset of data in buffer.
  *
- * len The maximum amount of data bytes to be sent.
+ * Returned Value:
+ *   The amount of data sent, or negated ERRNO in case of failure.
  *
  ****************************************************************************/
 
-void devif_send(FAR struct net_driver_s *dev, FAR const void *buf,
-                int len, unsigned int offset);
+int devif_send(FAR struct net_driver_s *dev, FAR const void *buf,
+               int len, unsigned int offset);
 
 /****************************************************************************
  * Name: devif_iob_send
@@ -477,51 +484,30 @@ void devif_send(FAR struct net_driver_s *dev, FAR const void *buf,
 
 #ifdef CONFIG_MM_IOB
 struct iob_s;
-void devif_iob_send(FAR struct net_driver_s *dev, FAR struct iob_s *buf,
+int devif_iob_send(FAR struct net_driver_s *dev, FAR struct iob_s *buf,
+                   unsigned int len, unsigned int offset,
+                   unsigned int target_offset);
+#endif
+
+/****************************************************************************
+ * Name: devif_file_send
+ *
+ * Description:
+ *   Called from socket logic in response to a xmit or poll request from the
+ *   the network interface driver.
+ *
+ *   This is identical to calling devif_file_send() except that the data is
+ *   in a available file handle.
+ *
+ * Assumptions:
+ *   Called with the network locked.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_MM_IOB
+int devif_file_send(FAR struct net_driver_s *dev, FAR struct file *file,
                     unsigned int len, unsigned int offset,
                     unsigned int target_offset);
-#endif
-
-/****************************************************************************
- * Name: devif_pkt_send
- *
- * Description:
- *   Called from socket logic in order to send a raw packet in response to
- *   an xmit or poll request from the network interface driver.
- *
- *   This is almost identical to calling devif_send() except that the data to
- *   be sent is copied into dev->d_buf (vs. dev->d_appdata), since there is
- *   no header on the data.
- *
- * Assumptions:
- *   This function must be called with the network locked.
- *
- ****************************************************************************/
-
-#if defined(CONFIG_NET_PKT)
-void devif_pkt_send(FAR struct net_driver_s *dev, FAR const void *buf,
-                    unsigned int len);
-#endif
-
-/****************************************************************************
- * Name: devif_can_send
- *
- * Description:
- *   Called from socket logic in order to send a raw packet in response to
- *   an xmit or poll request from the network interface driver.
- *
- *   This is almost identical to calling devif_send() except that the data to
- *   be sent is copied into dev->d_buf (vs. dev->d_appdata), since there is
- *   no header on the data.
- *
- * Assumptions:
- *   This function must be called with the network locked.
- *
- ****************************************************************************/
-
-#if defined(CONFIG_NET_CAN)
-void devif_can_send(FAR struct net_driver_s *dev, FAR const void *buf,
-                    unsigned int len);
 #endif
 
 /****************************************************************************
@@ -552,6 +538,21 @@ void devif_out(FAR struct net_driver_s *dev);
 
 int devif_poll_out(FAR struct net_driver_s *dev,
                    devif_poll_callback_t callback);
+
+/****************************************************************************
+ * Name: devif_is_loopback
+ *
+ * Description:
+ *   The function checks the destination address of the packet to see
+ *   whether the target of packet is ourself.
+ *
+ * Returned Value:
+ *   true is returned if the packet need loop back to ourself, otherwise
+ *   false is returned.
+ *
+ ****************************************************************************/
+
+bool devif_is_loopback(FAR struct net_driver_s *dev);
 
 /****************************************************************************
  * Name: devif_loopback
@@ -591,7 +592,7 @@ int devif_loopback(FAR struct net_driver_s *dev);
  *           pkt/ipv[4|6]_input()/...
  *                     |
  *                     |
- *     NICs io vector receive(Orignal flat buffer)
+ *     NICs io vector receive(Original flat buffer)
  *
  * Input Parameters:
  *   callback - Input callback of L3 stack
@@ -603,6 +604,22 @@ int devif_loopback(FAR struct net_driver_s *dev);
 
 int netdev_input(FAR struct net_driver_s *dev,
                  devif_poll_callback_t callback, bool reply);
+
+/****************************************************************************
+ * Name: devif_get_mtu
+ *
+ * Description:
+ *   Get mtu
+ *
+ * Parameters:
+ *   dev   Ethernet driver device structure
+ *
+ * Return:
+ *   return (Maximum packet size - Link layer header size),
+ *   if PMTUD enable return pmtu
+ ****************************************************************************/
+
+uint16_t devif_get_mtu(FAR struct net_driver_s *dev);
 
 #undef EXTERN
 #ifdef __cplusplus

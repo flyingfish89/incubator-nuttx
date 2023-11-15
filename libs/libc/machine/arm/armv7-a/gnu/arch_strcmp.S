@@ -30,6 +30,10 @@
  *
  ****************************************************************************/
 
+#include "libc.h"
+
+#ifdef LIBC_BUILD_STRCMP
+
 #ifdef __ARMEB__
 #define SHFT2LSB lsl
 #define SHFT2LSBEQ lsleq
@@ -113,7 +117,7 @@ strcmp:
 	 * both cases the other bits in r0 are all zero.  For r3 the
 	 * interesting byte is at the other end of the word, but the
 	 * other bits are not necessarily zero.  We need a signed result
-	 * representing the differnece in the unsigned bytes, so for the
+	 * representing the difference in the unsigned bytes, so for the
 	 * little-endian case we can't just shift the interesting bits up.
 	 */
 #ifdef __ARMEB__
@@ -301,3 +305,5 @@ strcmp:
 	ldr	r5, [sp], #4
 	bx	lr
 	.size strcmp, . - strcmp
+
+#endif

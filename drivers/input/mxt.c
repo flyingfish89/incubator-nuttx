@@ -272,7 +272,7 @@ static int  mxt_hwinitialize(FAR struct mxt_dev_s *priv);
 
 /* This the vtable that supports the character driver interface */
 
-static const struct file_operations mxt_fops =
+static const struct file_operations g_mxt_fops =
 {
   mxt_open,    /* open */
   mxt_close,   /* close */
@@ -657,7 +657,7 @@ static inline int mxt_waitsample(FAR struct mxt_dev_s *priv)
   irqstate_t flags;
   int ret;
 
-  /* Interrupts me be disabled when this is called to (1) prevent posting
+  /* Interrupts must be disabled when this is called to (1) prevent posting
    * of semaphores from interrupt handlers, and (2) to prevent sampled data
    * from changing until it has been reported.
    */
@@ -1104,11 +1104,10 @@ static int mxt_open(FAR struct file *filep)
   uint8_t tmp;
   int ret;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct mxt_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
@@ -1182,11 +1181,10 @@ static int mxt_close(FAR struct file *filep)
   FAR struct mxt_dev_s *priv;
   int ret;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct mxt_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
@@ -1237,11 +1235,10 @@ static ssize_t mxt_read(FAR struct file *filep, FAR char *buffer, size_t len)
   int i;
   int j;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct mxt_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Verify that the caller has provided a buffer large enough to receive
    * the touch data.
@@ -1263,12 +1260,6 @@ static ssize_t mxt_read(FAR struct file *filep, FAR char *buffer, size_t len)
     {
       return ret;
     }
-
-  /* Locking the scheduler will prevent the worker thread from running
-   * until we finish here.
-   */
-
-  sched_lock();
 
   /* Try to read sample data. */
 
@@ -1455,7 +1446,6 @@ static ssize_t mxt_read(FAR struct file *filep, FAR char *buffer, size_t len)
   ret = samplesize;
 
 errout:
-  sched_unlock();
   nxmutex_unlock(&priv->devlock);
   return ret;
 }
@@ -1471,11 +1461,10 @@ static int mxt_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   int                       ret;
 
   iinfo("cmd: %d arg: %ld\n", cmd, arg);
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct mxt_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
@@ -1528,11 +1517,11 @@ static int mxt_poll(FAR struct file *filep, FAR struct pollfd *fds,
   int                       i;
 
   iinfo("setup: %d\n", (int)setup);
-  DEBUGASSERT(filep && fds);
+  DEBUGASSERT(fds);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct mxt_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Are we setting up the poll?  Or tearing it down? */
 
@@ -1845,7 +1834,7 @@ int mxt_register(FAR struct i2c_master_s *i2c,
 
   /* Create and initialize a maXTouch device driver instance */
 
-  priv = (FAR struct mxt_dev_s *)kmm_zalloc(sizeof(struct mxt_dev_s));
+  priv = kmm_zalloc(sizeof(struct mxt_dev_s));
   if (priv == NULL)
     {
       ierr("ERROR: Failed allocate device structure\n");
@@ -1891,7 +1880,7 @@ int mxt_register(FAR struct i2c_master_s *i2c,
   snprintf(devname, sizeof(devname), DEV_FORMAT, minor);
   iinfo("Registering %s\n", devname);
 
-  ret = register_driver(devname, &mxt_fops, 0666, priv);
+  ret = register_driver(devname, &g_mxt_fops, 0666, priv);
   if (ret < 0)
     {
       ierr("ERROR: register_driver() failed: %d\n", ret);

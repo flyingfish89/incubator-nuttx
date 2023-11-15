@@ -75,8 +75,18 @@
 
 void arp_format(FAR struct net_driver_s *dev, in_addr_t ipaddr)
 {
-  FAR struct arp_hdr_s *arp = ARPBUF;
-  FAR struct eth_hdr_s *eth = ETHBUF;
+  FAR struct arp_hdr_s *arp;
+  FAR struct eth_hdr_s *eth;
+
+  /* Prepare device buffer before format arp */
+
+  if (netdev_iob_prepare(dev, false, 0) != OK)
+    {
+      return;
+    }
+
+  arp = ARPBUF;
+  eth = ETHBUF;
 
   /* Construct the ARP packet.  Creating both the Ethernet and ARP headers */
 
@@ -99,7 +109,7 @@ void arp_format(FAR struct net_driver_s *dev, in_addr_t ipaddr)
 
   /* Update device buffer length */
 
-  iob_update_pktlen(dev->d_iob, sizeof(struct arp_hdr_s));
+  iob_update_pktlen(dev->d_iob, sizeof(struct arp_hdr_s), false);
 }
 
 #endif /* CONFIG_NET_ARP */

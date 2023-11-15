@@ -27,10 +27,10 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
-#include <stdatomic.h>
 
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/queue.h>
 
 #ifdef __APPLE__
 #include <malloc/malloc.h>
@@ -44,9 +44,6 @@
  * Private Data
  ****************************************************************************/
 
-static atomic_int g_aordblks;
-static atomic_int g_uordblks;
-
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -59,18 +56,19 @@ static atomic_int g_uordblks;
  *
  ****************************************************************************/
 
-void *host_allocheap(size_t sz)
+void *host_allocheap(size_t size, bool exec)
 {
   void *p;
 
 #if defined(CONFIG_HOST_MACOS) && defined(CONFIG_HOST_ARM64)
   /* see: https://developer.apple.com/forums/thread/672804 */
 
-  p = mmap(NULL, sz, PROT_READ | PROT_WRITE,
-           MAP_ANON | MAP_SHARED, -1, 0);
+  p = host_uninterruptible(mmap, NULL, size, PROT_READ | PROT_WRITE,
+                           MAP_ANON | MAP_SHARED, -1, 0);
 #else
-  p = mmap(NULL, sz, PROT_READ | PROT_WRITE | PROT_EXEC,
-           MAP_ANON | MAP_PRIVATE, -1, 0);
+  p = host_uninterruptible(mmap, NULL, size, PROT_READ | PROT_WRITE |
+                           (exec ? PROT_EXEC : 0),
+                           MAP_ANON | MAP_PRIVATE, -1, 0);
 #endif
 
   if (p == MAP_FAILED)
@@ -79,6 +77,19 @@ void *host_allocheap(size_t sz)
     }
 
   return p;
+}
+
+/****************************************************************************
+ * Name: host_freeheap
+ *
+ * Description:
+ *   Free a executable memory block.
+ *
+ ****************************************************************************/
+
+void host_freeheap(void *mem)
+{
+  host_uninterruptible(munmap, mem, 0);
 }
 
 void *host_allocshmem(const char *name, size_t size, int master)
@@ -94,7 +105,7 @@ void *host_allocshmem(const char *name, size_t size, int master)
       oflag |= O_CREAT | O_TRUNC;
     }
 
-  fd = shm_open(name, oflag, S_IRUSR | S_IWUSR);
+  fd = host_uninterruptible(shm_open, name, oflag, S_IRUSR | S_IWUSR);
   if (fd < 0)
     {
       return NULL;
@@ -104,18 +115,19 @@ void *host_allocshmem(const char *name, size_t size, int master)
     {
       /* Avoid the second slave instance open successfully */
 
-      shm_unlink(name);
+      host_unlinkshmem(name);
     }
 
-  ret = ftruncate(fd, size);
+  ret = host_uninterruptible(ftruncate, fd, size);
   if (ret < 0)
     {
-      close(fd);
+      host_uninterruptible(close, fd);
       return NULL;
     }
 
-  mem = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-  close(fd); /* Don't need keep fd any more once the memory get mapped */
+  mem = host_uninterruptible(mmap, NULL, size,
+                             PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  host_uninterruptible(close, fd); /* Don't need keep fd any more once the memory get mapped */
   if (mem == MAP_FAILED)
     {
       return NULL;
@@ -126,15 +138,20 @@ void *host_allocshmem(const char *name, size_t size, int master)
 
 void host_freeshmem(void *mem)
 {
-  munmap(mem, 0);
+  host_uninterruptible(munmap, mem, 0);
+}
+
+int host_unlinkshmem(const char *name)
+{
+  return host_uninterruptible(shm_unlink, name);
 }
 
 size_t host_mallocsize(void *mem)
 {
 #ifdef __APPLE__
-  return malloc_size(mem);
+  return host_uninterruptible(malloc_size, mem);
 #else
-  return malloc_usable_size(mem);
+  return host_uninterruptible(malloc_usable_size, mem);
 #endif
 }
 
@@ -143,65 +160,39 @@ void *host_memalign(size_t alignment, size_t size)
   void *p;
   int error;
 
-  error = posix_memalign(&p, alignment, size);
+  if (alignment < sizeof(void *))
+    {
+      alignment = sizeof(void *);
+    }
+
+  error = host_uninterruptible(posix_memalign, &p, alignment, size);
   if (error != 0)
     {
       return NULL;
     }
-
-  size = host_mallocsize(p);
-  g_aordblks += 1;
-  g_uordblks += size;
 
   return p;
 }
 
 void host_free(void *mem)
 {
-  size_t size;
-
   if (mem == NULL)
     {
       return;
     }
 
-  size = host_mallocsize(mem);
-  g_aordblks -= 1;
-  g_uordblks -= size;
-  free(mem);
+  host_uninterruptible_no_return(free, mem);
 }
 
 void *host_realloc(void *oldmem, size_t size)
 {
-  size_t oldsize;
   void *mem;
 
-  if (size == 0)
-    {
-      host_free(oldmem);
-      return NULL;
-    }
-  else if (oldmem == NULL)
+  if (oldmem == NULL)
     {
       return host_memalign(sizeof(void *), size);
     }
 
-  oldsize = host_mallocsize(oldmem);
-  mem = realloc(oldmem, size);
-  if (mem == NULL)
-    {
-      return NULL;
-    }
-
-  size = host_mallocsize(mem);
-  g_uordblks -= oldsize;
-  g_uordblks += size;
-
+  mem = host_uninterruptible(realloc, oldmem, size);
   return mem;
-}
-
-void host_mallinfo(int *aordblks, int *uordblks)
-{
-  *aordblks = g_aordblks;
-  *uordblks = g_uordblks;
 }

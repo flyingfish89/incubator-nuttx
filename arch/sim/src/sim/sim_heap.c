@@ -26,7 +26,7 @@
 
 #include <assert.h>
 #include <string.h>
-#include <malloc.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 
 #include <nuttx/arch.h>
@@ -51,6 +51,9 @@ struct mm_delaynode_s
 struct mm_heap_s
 {
   struct mm_delaynode_s *mm_delaylist[CONFIG_SMP_NCPUS];
+  atomic_int aordblks;
+  atomic_int uordblks;
+  atomic_int usmblks;
 
 #if defined(CONFIG_FS_PROCFS) && !defined(CONFIG_FS_PROCFS_EXCLUDE_MEMINFO)
   struct procfs_meminfo_entry_s mm_procfs;
@@ -69,12 +72,12 @@ static void mm_add_delaylist(struct mm_heap_s *heap, void *mem)
 
   /* Delay the deallocation until a more appropriate time. */
 
-  flags = enter_critical_section();
+  flags = up_irq_save();
 
   tmp->flink = heap->mm_delaylist[up_cpu_index()];
   heap->mm_delaylist[up_cpu_index()] = tmp;
 
-  leave_critical_section(flags);
+  up_irq_restore(flags);
 #endif
 }
 
@@ -86,12 +89,12 @@ static void mm_free_delaylist(struct mm_heap_s *heap)
 
   /* Move the delay list to local */
 
-  flags = enter_critical_section();
+  flags = up_irq_save();
 
   tmp = heap->mm_delaylist[up_cpu_index()];
   heap->mm_delaylist[up_cpu_index()] = NULL;
 
-  leave_critical_section(flags);
+  up_irq_restore(flags);
 
   /* Test if the delayed is empty */
 
@@ -217,10 +220,10 @@ void mm_free(struct mm_heap_s *heap, void *mem)
   else
 #endif
 
-  if (gettid() < 0)
+  if (nxsched_gettid() < 0)
     {
-      /* gettid() return -ESRCH, means we are in situations
-       * during context switching(See gettid's comment).
+      /* nxsched_gettid() return -ESRCH, means we are in situations
+       * during context switching(See nxsched_gettid's comment).
        * Then add to the delay list.
        */
 
@@ -228,6 +231,9 @@ void mm_free(struct mm_heap_s *heap, void *mem)
     }
   else
     {
+      int size = host_mallocsize(mem);
+      atomic_fetch_sub(&heap->aordblks, 1);
+      atomic_fetch_sub(&heap->uordblks, size);
       host_free(mem);
     }
 }
@@ -256,10 +262,40 @@ void mm_free(struct mm_heap_s *heap, void *mem)
  ****************************************************************************/
 
 void *mm_realloc(struct mm_heap_s *heap, void *oldmem,
-                    size_t size)
+                 size_t size)
 {
+  void *mem;
+  int uordblks;
+  int usmblks;
+  int newsize;
+
   mm_free_delaylist(heap);
-  return host_realloc(oldmem, size);
+
+  if (size == 0)
+    {
+      mm_free(heap, oldmem);
+      return NULL;
+    }
+
+  atomic_fetch_sub(&heap->uordblks, host_mallocsize(oldmem));
+  mem = host_realloc(oldmem, size);
+
+  atomic_fetch_add(&heap->aordblks, oldmem == NULL && mem != NULL);
+  newsize = host_mallocsize(mem ? mem : oldmem);
+  atomic_fetch_add(&heap->uordblks, newsize);
+  usmblks = atomic_load(&heap->usmblks);
+
+  do
+    {
+      uordblks = atomic_load(&heap->uordblks);
+      if (uordblks <= usmblks)
+        {
+          break;
+        }
+    }
+  while (atomic_compare_exchange_weak(&heap->usmblks, &usmblks, uordblks));
+
+  return mem;
 }
 
 /****************************************************************************
@@ -316,11 +352,36 @@ void *mm_zalloc(struct mm_heap_s *heap, size_t size)
  *
  ****************************************************************************/
 
-void *mm_memalign(struct mm_heap_s *heap, size_t alignment,
-                      size_t size)
+void *mm_memalign(struct mm_heap_s *heap, size_t alignment, size_t size)
 {
+  void *mem;
+  int uordblks;
+  int usmblks;
+
   mm_free_delaylist(heap);
-  return host_memalign(alignment, size);
+  mem = host_memalign(alignment, size);
+
+  if (mem == NULL)
+    {
+      return NULL;
+    }
+
+  size = host_mallocsize(mem);
+  atomic_fetch_add(&heap->aordblks, 1);
+  atomic_fetch_add(&heap->uordblks, size);
+  usmblks = atomic_load(&heap->usmblks);
+
+  do
+    {
+      uordblks = atomic_load(&heap->uordblks);
+      if (uordblks <= usmblks)
+        {
+          break;
+        }
+    }
+  while (atomic_compare_exchange_weak(&heap->usmblks, &usmblks, uordblks));
+
+  return mem;
 }
 
 /****************************************************************************
@@ -381,11 +442,34 @@ void mm_extend(struct mm_heap_s *heap, void *mem, size_t size,
  *
  ****************************************************************************/
 
-int mm_mallinfo(struct mm_heap_s *heap, struct mallinfo *info)
+struct mallinfo mm_mallinfo(struct mm_heap_s *heap)
 {
-  memset(info, 0, sizeof(struct mallinfo));
-  host_mallinfo(&info->aordblks, &info->uordblks);
-  return 0;
+  struct mallinfo info;
+
+  memset(&info, 0, sizeof(struct mallinfo));
+  info.aordblks = atomic_load(&heap->aordblks);
+  info.uordblks = atomic_load(&heap->uordblks);
+  info.usmblks  = atomic_load(&heap->usmblks);
+  return info;
+}
+
+/****************************************************************************
+ * Name: mm_mallinfo_task
+ *
+ * Description:
+ *   mallinfo_task returns a copy of updated current task's heap information.
+ *
+ ****************************************************************************/
+
+struct mallinfo_task mm_mallinfo_task(struct mm_heap_s *heap,
+                                      const struct malltask *task)
+{
+  struct mallinfo_task info =
+    {
+      0, 0
+    };
+
+  return info;
 }
 
 /****************************************************************************
@@ -396,7 +480,7 @@ int mm_mallinfo(struct mm_heap_s *heap, struct mallinfo *info)
  *
  ****************************************************************************/
 
-void mm_memdump(struct mm_heap_s *heap, pid_t pid)
+void mm_memdump(struct mm_heap_s *heap, const struct mm_memdump_s *dump)
 {
 }
 
@@ -420,7 +504,7 @@ void mm_checkcorruption(struct mm_heap_s *heap)
  * Name: malloc_size
  ****************************************************************************/
 
-size_t mm_malloc_size(void *mem)
+size_t mm_malloc_size(struct mm_heap_s *heap, void *mem)
 {
   return host_mallocsize(mem);
 }
@@ -455,7 +539,7 @@ void up_allocate_heap(void **heap_start, size_t *heap_size)
    * ARCH_HAVE_TEXT_HEAP mechanism can be an alternative.
    */
 
-  uint8_t *sim_heap = host_allocheap(SIM_HEAP_SIZE);
+  uint8_t *sim_heap = host_allocheap(SIM_HEAP_SIZE, false);
 
   *heap_start = sim_heap;
   *heap_size  = SIM_HEAP_SIZE;

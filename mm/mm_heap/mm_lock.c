@@ -62,32 +62,31 @@ int mm_lock(FAR struct mm_heap_s *heap)
 
   if (up_interrupt_context())
     {
-#if !defined(CONFIG_SMP)
+#  if !defined(CONFIG_SMP)
       /* Check the mutex value, if held by someone, then return false.
        * Or, touch the heap internal data directly.
        */
 
       return nxmutex_is_locked(&heap->mm_lock) ? -EAGAIN : 0;
-#else
+#  else
       /* Can't take mutex in SMP interrupt handler */
 
       return -EAGAIN;
-#endif
+#  endif
     }
-  else
 #endif
 
-  /* gettid() returns the task ID of the task at the head of the ready-to-
-   * run task list.  mm_lock() may be called during context
+  /* _SCHED_GETTID() returns the task ID of the task at the head of the
+   * ready-to-run task list.  mm_lock() may be called during context
    * switches.  There are certain situations during context switching when
    * the OS data structures are in flux and then can't be freed immediately
    * (e.g. the running thread stack).
    *
-   * This is handled by gettid() to return the special value -ESRCH to
-   * indicate this special situation.
+   * This is handled by _SCHED_GETTID() to return the special value -ESRCH
+   * to indicate this special situation.
    */
 
-  if (gettid() < 0)
+  if (_SCHED_GETTID() < 0)
     {
       return -ESRCH;
     }

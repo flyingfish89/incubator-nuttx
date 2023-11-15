@@ -105,6 +105,7 @@
 #include "ipforward/ipforward.h"
 #include "devif/devif.h"
 #include "nat/nat.h"
+#include "ipfrag/ipfrag.h"
 #include "utils/utils.h"
 
 /****************************************************************************
@@ -206,7 +207,7 @@ static int ipv4_in(FAR struct net_driver_s *dev)
   totlen = (ipv4->len[0] << 8) + ipv4->len[1];
   if (totlen < dev->d_len)
     {
-      iob_update_pktlen(dev->d_iob, totlen);
+      iob_update_pktlen(dev->d_iob, totlen, false);
       dev->d_len = totlen;
     }
   else if (totlen > dev->d_len)
@@ -219,6 +220,13 @@ static int ipv4_in(FAR struct net_driver_s *dev)
 
   if ((ipv4->ipoffset[0] & 0x3f) != 0 || ipv4->ipoffset[1] != 0)
     {
+#ifdef CONFIG_NET_IPFRAG
+      if (ipv4_fragin(dev) == OK)
+        {
+          return OK;
+        }
+
+#endif
 #ifdef CONFIG_NET_STATISTICS
       g_netstats.ipv4.drop++;
       g_netstats.ipv4.fragerr++;
@@ -434,6 +442,11 @@ static int ipv4_in(FAR struct net_driver_s *dev)
     (defined(CONFIG_NET_BROADCAST) && defined(NET_UDP_HAVE_STACK))
 done:
 #endif
+
+#ifdef CONFIG_NET_IPFRAG
+  ip_fragout(dev);
+#endif
+
   devif_out(dev);
 
   /* Return and let the caller do any pending transmission. */
@@ -484,8 +497,7 @@ int ipv4_input(FAR struct net_driver_s *dev)
 
       /* Set the device buffer to l2 */
 
-      dev->d_buf = &dev->d_iob->io_data[CONFIG_NET_LL_GUARDSIZE -
-                                        NET_LL_HDRLEN(dev)];
+      dev->d_buf = NETLLBUF;
       ret = ipv4_in(dev);
 
       dev->d_buf = buf;

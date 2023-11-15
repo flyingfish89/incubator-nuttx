@@ -166,10 +166,6 @@ static int sim_loop_task(int argc, char **argv)
 
       sched_lock();
 
-      /* Handle UART data availability */
-
-      sim_uartloop();
-
 #if defined(CONFIG_SIM_TOUCHSCREEN) || defined(CONFIG_SIM_AJOYSTICK) || \
     defined(CONFIG_SIM_BUTTONS)
       /* Drive the X11 event loop */
@@ -191,20 +187,16 @@ static int sim_loop_task(int argc, char **argv)
       host_usrsock_loop();
 #endif
 
-#ifdef CONFIG_RPTUN
-      sim_rptun_loop();
-#endif
-
-#ifdef CONFIG_SIM_HCISOCKET
-      sim_bthcisock_loop();
-#endif
-
 #ifdef CONFIG_SIM_SOUND
       sim_audio_loop();
 #endif
 
-#ifdef CONFIG_SIM_VIDEO
-      sim_video_loop();
+#ifdef CONFIG_SIM_CAMERA
+      sim_camera_loop();
+#endif
+
+#ifdef CONFIG_SIM_USB_DEV
+      sim_usbdev_loop();
 #endif
 
 #ifdef CONFIG_MOTOR_FOC_DUMMY
@@ -216,9 +208,13 @@ static int sim_loop_task(int argc, char **argv)
       sched_unlock();
       up_irq_restore(flags);
 
+#ifdef CONFIG_SIM_USB_HOST
+      sim_usbhost_loop();
+#endif
+
       /* Sleep minimal time, let the idle run */
 
-      usleep(USEC_PER_TICK);
+      usleep(CONFIG_SIM_LOOPTASK_INTERVAL);
     }
 
   return 0;
@@ -250,6 +246,10 @@ static int sim_loop_task(int argc, char **argv)
 
 void up_initialize(void)
 {
+#ifdef CONFIG_SIM_IMAGEPATH_AS_CWD
+  host_init_cwd();
+#endif
+
 #ifdef CONFIG_PM
   /* Initialize the power management subsystem.  This MCU-specific function
    * must be called *very* early in the initialization sequence *before* any
@@ -282,11 +282,31 @@ void up_initialize(void)
 #endif
 
 #ifdef CONFIG_SIM_SOUND
-  audio_register("pcm0p", sim_audio_initialize(true));
-  audio_register("pcm0c", sim_audio_initialize(false));
+  /* Register audio normal device */
+
+  audio_register("pcm0p", sim_audio_initialize(true, false));
+  audio_register("pcm0c", sim_audio_initialize(false, false));
+
+  /* Register audio compress device */
+
+  audio_register("pcm1p", sim_audio_initialize(true, true));
+  audio_register("pcm1c", sim_audio_initialize(false, true));
+
+  /* register independent mixer device, simulate amixer ioctl */
+
+  audio_register("mixer", sim_audio_initialize(false, false));
+
 #endif
 
-  kthread_create("loop_task", SCHED_PRIORITY_MAX,
+#ifdef CONFIG_SIM_USB_DEV
+  sim_usbdev_initialize();
+#endif
+
+#ifdef CONFIG_SIM_USB_HOST
+  sim_usbhost_initialize();
+#endif
+
+  kthread_create("loop_task", CONFIG_SIM_LOOPTASK_PRIORITY,
                  CONFIG_DEFAULT_TASK_STACKSIZE,
                  sim_loop_task, NULL);
 }

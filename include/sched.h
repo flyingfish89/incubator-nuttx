@@ -1,4 +1,4 @@
-/********************************************************************************
+/****************************************************************************
  * include/sched.h
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
@@ -16,14 +16,14 @@
  * License for the specific language governing permissions and limitations
  * under the License.
  *
- ********************************************************************************/
+ ****************************************************************************/
 
 #ifndef __INCLUDE_SCHED_H
 #define __INCLUDE_SCHED_H
 
-/********************************************************************************
+/****************************************************************************
  * Included Files
- ********************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -33,24 +33,25 @@
 #include <strings.h>
 #include <time.h>
 
-/********************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- ********************************************************************************/
+ ****************************************************************************/
 
-/* Task Management Definitions **************************************************/
+/* Task Management Definitions **********************************************/
 
 /* POSIX-like scheduling policies */
 
+#define SCHED_NORMAL              0  /* Alias to SCHED_OTHER */
+#define SCHED_OTHER               0  /* Map to SCHED_FIFO or SCHED_RR */
 #define SCHED_FIFO                1  /* FIFO priority scheduling policy */
 #define SCHED_RR                  2  /* Round robin scheduling policy */
 #define SCHED_SPORADIC            3  /* Sporadic scheduling policy */
-#define SCHED_OTHER               4  /* Not supported */
 
 /* Maximum number of SCHED_SPORADIC replenishments */
 
 #define SS_REPL_MAX               CONFIG_SCHED_SPORADIC_MAXREPL
 
-/* Cancellation definitions *****************************************************/
+/* Cancellation definitions *************************************************/
 
 /* Cancellation states used by task_setcancelstate() */
 
@@ -62,11 +63,11 @@
 #define TASK_CANCEL_DEFERRED      (0)
 #define TASK_CANCEL_ASYNCHRONOUS  (1)
 
-/* Pthread definitions **********************************************************/
+/* Pthread definitions ******************************************************/
 
 #define PTHREAD_KEYS_MAX          CONFIG_TLS_NELEM
 
-/* CPU affinity mask helpers ****************************************************/
+/* CPU affinity mask helpers ************************************************/
 
 /* These are not standard but are defined for Linux compatibility */
 
@@ -177,9 +178,9 @@
 
 #endif /* CONFIG_SMP */
 
-/********************************************************************************
+/****************************************************************************
  * Public Type Definitions
- ********************************************************************************/
+ ****************************************************************************/
 
 /* This is the POSIX-like scheduling parameter structure */
 
@@ -198,9 +199,9 @@ struct sched_param
 #endif
 };
 
-/********************************************************************************
+/****************************************************************************
  * Public Data
- ********************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ASSEMBLY__
 #undef EXTERN
@@ -212,9 +213,9 @@ extern "C"
 #define EXTERN extern
 #endif
 
-/********************************************************************************
+/****************************************************************************
  * Public Function Prototypes
- ********************************************************************************/
+ ****************************************************************************/
 
 /* Task Control Interfaces (non-standard) */
 
@@ -252,6 +253,8 @@ int    sched_setaffinity(pid_t pid, size_t cpusetsize,
 int    sched_getaffinity(pid_t pid, size_t cpusetsize, FAR cpu_set_t *mask);
 int    sched_cpucount(FAR const cpu_set_t *set);
 int    sched_getcpu(void);
+#else
+#  define sched_getcpu() 0
 #endif /* CONFIG_SMP */
 
 /* Task Switching Interfaces (non-standard) */
@@ -266,8 +269,13 @@ bool   sched_idletask(void);
 
 /* Task Backtrace */
 
+#ifdef CONFIG_SCHED_BACKTRACE
 int    sched_backtrace(pid_t tid, FAR void **buffer, int size, int skip);
 void   sched_dumpstack(pid_t tid);
+#else
+#  define sched_backtrace(tid, buffer, size, skip) 0
+#  define sched_dumpstack(tid)
+#endif
 
 #undef EXTERN
 #if defined(__cplusplus)

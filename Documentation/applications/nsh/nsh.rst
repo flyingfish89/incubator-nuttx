@@ -1,9 +1,9 @@
 .. include:: /substitutions.rst
 .. _nsh:
 
-********
+========
 Overview
-********
+========
 
 **The NSH Library**. The ``apps/nshlib`` sub-directory contains the
 NuttShell (NSH) library. This library can easily to linked to
@@ -12,7 +12,7 @@ produce a NSH application (See as an example
 application for NuttX.
 
 Console/NSH Front End
-*********************
+=====================
 
 **NSH Consoles**. Using settings in the configuration file, NSH may be
 configured to use (1) the serial stdin/out, (2) a USB serial
@@ -83,7 +83,7 @@ Key Binding            Editor Action
 =====================  ================================================
 
 Command Overview
-****************
+================
 
 **Simple, Re-directed, and Background Commands**. The NuttShell
 (NSH) is a simple shell application. NSH supports the following
@@ -159,7 +159,7 @@ significant resources, they are disabled by default.
      also selected.
 
 Conditional Command Execution
-*****************************
+=============================
 
 An ``if-then[-else]-fi`` construct is also supported in order to
 support conditional execution of commands. This works from the
@@ -175,7 +175,7 @@ command line but is primarily intended for use within NSH scripts
     [sequence of <cmd>]
   fi
 
-Where ``<cmd>`` is a `simple command <#cmdoverview>`__. The
+Where ``<cmd>`` is a `simple command <#command-overview>`__. The
 command success value of zero is treated true; a non-zero command
 failure value is treated false. The ```test`` <#cmdtest>`__
 command is frequently used for comparisons.
@@ -191,7 +191,7 @@ Examples:
   1 is not equal 0
 
 Looping
-*******
+=======
 
 **Looping Constructs**. ``while-do-done`` and ``until-do-done``
 looping constructs are also supported. These work from the command
@@ -220,7 +220,7 @@ the ```sh`` <#cmdsh>`__ command).
         [sequence of <cmd>]
       done
 
-Where ``<cmd>`` is a `simple command <#cmdoverview>`__. The
+Where ``<cmd>`` is a `simple command <#command-overview>`__. The
 command success value of zero is treated true; a non-zero command
 failure value is treated false. The ```test`` <#cmdtest>`__
 command is frequently used for comparisons.
@@ -233,7 +233,7 @@ the loop will immediately terminate and execution will continue
 with the next command immediately following the ``done`` token.
 
 Built-In Variables
-******************
+==================
 
 ======  ====================================================
 ``$?`` 	The result of the last simple command execution. |br|
@@ -242,7 +242,7 @@ Built-In Variables
 ======  ====================================================
 
 Current Working Directory
-*************************
+=========================
 
 ``cd`` **and** ``pwd``. All path arguments to commands may be
 either an absolute path or a path relative to the current working
@@ -251,7 +251,7 @@ directory. The current working directory is set using the
 ``pwd`` command or by using the ``echo $PWD`` command.
 
 Environment Variables
-*********************
+=====================
 
 ==========  ================================================
 ``PATH``    The default path in the file systems to look |br|
@@ -260,15 +260,16 @@ Environment Variables
 ``OLDPWD``  The previous working directory
 ==========  ================================================
 
+
 NSH Start-Up Script
-*******************
+===================
 
 **NSH Start-Up Script**. NSH supports options to provide a start
 up script for NSH. In general this capability is enabled with
 ``CONFIG_NSH_ROMFSETC``, but has several other related
-configuration options as described with the `NSH-specific
-configuration settings <#nshconfiguration>`__. This capability
-also depends on:
+configuration options as described with the
+:doc:`NSH specific configuration settings <config>`.
+This capability also depends on:
 
   -  ``CONFIG_DISABLE_MOUNTPOINT`` not set
   -  ``CONFIG_FS_ROMFS`` enabled
@@ -330,8 +331,7 @@ start-up behavior, there are three things to study:
 
   #. **Configuration Options.** The additional
      ``CONFIG_NSH_ROMFSETC`` configuration options discussed with
-     the other `NSH-specific configuration
-     settings <#nshconfiguration>`__.
+     the other :doc:`NSH specific configuration settings <config>`.
   #. `tools/mkromfsimg.sh`` **Script**. The script
      ``tools/mkromfsimg.sh`` creates ``nsh_romfsimg.h``. It is not
      automatically executed. If you want to change the configuration
@@ -377,7 +377,7 @@ the final ``rc.sysinit``, and ``rc.sysinit.template`` to create the final
 ``rcS`` and (2) to generate the header file ``nsh_romfsimg.h``
 containing the ROMFS file system image.
 
-**Further Information**. See the section on `Customizing the
-NuttShell <#customizingnsh>`__ for additional, more detailed
+**Further Information**. See the section on 
+:doc:`Customizing the NuttShell <customizing>` for additional, more detailed
 information about the NSH start-up script and how to modify it.
 

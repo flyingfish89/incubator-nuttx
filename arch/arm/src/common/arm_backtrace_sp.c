@@ -77,11 +77,6 @@ static bool in_code_region(unsigned long pc)
 {
   int i = 0;
 
-  if (pc >= (unsigned long)_START_TEXT && pc < (unsigned long)_END_TEXT)
-    {
-      return true;
-    }
-
   if (g_backtrace_code_regions)
     {
       while (g_backtrace_code_regions[i] &&
@@ -96,6 +91,13 @@ static bool in_code_region(unsigned long pc)
 
           i += 2;
         }
+    }
+
+  /* When g_backtrace_code_regions is null, try to use all the text section */
+
+  else if (pc >= (unsigned long)_START_TEXT && pc < (unsigned long)_END_TEXT)
+    {
+      return true;
     }
 
   return false;
@@ -126,6 +128,11 @@ static int backtrace_branch(unsigned long top, unsigned long sp,
         }
 
       addr = (addr & ~1) - 2;
+      if (!in_code_region(addr))
+        {
+          continue;
+        }
+
       ins16 = *(uint16_t *)addr;
       if (INSTR_IS(ins16, T_BLX))
         {
@@ -145,6 +152,11 @@ static int backtrace_branch(unsigned long top, unsigned long sp,
       else if ((ins16 & 0xd000) == 0xd000)
         {
           addr -= 2;
+          if (!in_code_region(addr))
+            {
+              continue;
+            }
+
           ins16 = *(uint16_t *)addr;
           if (INSTR_IS(ins16, T_BL))
             {
@@ -170,7 +182,7 @@ static int backtrace_branch(unsigned long top, unsigned long sp,
  *  The up call up_backtrace_init_code_regions() will set the start
  *  and end addresses of the customized program sections, this method
  *  will help the different boards to configure the current text
- *  sections for some complicate platfroms
+ *  sections for some complicate platforms
  *
  * Input Parameters:
  *   regions  The start and end address of the text segment
@@ -262,7 +274,7 @@ int up_backtrace(struct tcb_s *tcb,
               ret += backtrace_branch((unsigned long)
                                       rtcb->stack_base_ptr +
                                       rtcb->adj_stack_size,
-                                      rtcb->xcp.regs[REG_SP],
+                                      CURRENT_REGS[REG_SP],
                                       &buffer[ret],
                                       size - ret, &skip);
             }

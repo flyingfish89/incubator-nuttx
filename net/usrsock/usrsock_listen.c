@@ -106,7 +106,7 @@ static int do_listen_request(FAR struct usrsock_conn_s *conn, int backlog)
   bufs[0].iov_base = &req;
   bufs[0].iov_len = sizeof(req);
 
-  return usrsock_do_request(conn, bufs, ARRAY_SIZE(bufs));
+  return usrsock_do_request(conn, bufs, nitems(bufs));
 }
 
 /****************************************************************************
@@ -147,8 +147,6 @@ int usrsock_listen(FAR struct socket *psock, int backlog)
   };
 
   int ret;
-
-  DEBUGASSERT(conn);
 
   net_lock();
 
@@ -210,7 +208,7 @@ int usrsock_listen(FAR struct socket *psock, int backlog)
 
   /* Wait for completion of request (or signal). */
 
-  ret = net_lockedwait(&state.recvsem);
+  ret = net_sem_wait(&state.recvsem);
   if (ret < 0)
     {
       /* Wait interrupted, exit early. */

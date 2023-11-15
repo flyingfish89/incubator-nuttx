@@ -26,6 +26,8 @@
 
 #include <string.h>
 
+#include <sys/param.h>
+
 #include <nuttx/clk/clk.h>
 #include <nuttx/clk/clk_provider.h>
 #include <nuttx/kmalloc.h>
@@ -48,10 +50,6 @@
 #define CLK_RPMSG_ROUNDRATE         6
 #define CLK_RPMSG_ISENABLED         7
 
-#ifndef ARRAY_SIZE
-#  define ARRAY_SIZE(x)             (sizeof(x) / sizeof((x)[0]))
-#endif
-
 /****************************************************************************
  * Private Types
  ****************************************************************************/
@@ -73,7 +71,7 @@ struct clk_rpmsg_server_s
 struct clk_rpmsg_s
 {
   FAR struct clk_s          *clk;
-  uint32_t                  count;
+  bool                      enable;
   struct list_node          node;
 };
 
@@ -316,20 +314,22 @@ static int clk_rpmsg_enable_handler(FAR struct rpmsg_endpoint *ept,
 {
   FAR struct clk_rpmsg_enable_s *msg = data;
   FAR struct clk_rpmsg_s *clkrp = clk_rpmsg_get_clk(ept, msg->name);
+  int ret = -ENOENT;
 
-  if (clkrp)
+  if (clkrp && !clkrp->enable)
     {
-      msg->header.result = clk_enable(clkrp->clk);
-      if (!msg->header.result)
+      ret = clk_enable(clkrp->clk);
+      if (ret >= 0)
         {
-          clkrp->count++;
+          clkrp->enable = true;
         }
     }
-  else
+  else if (clkrp && clkrp->enable)
     {
-      msg->header.result = -ENOENT;
+      ret = 0;
     }
 
+  msg->header.result = ret;
   return rpmsg_send(ept, msg, sizeof(*msg));
 }
 
@@ -339,18 +339,22 @@ static int clk_rpmsg_disable_handler(FAR struct rpmsg_endpoint *ept,
 {
   FAR struct clk_rpmsg_disable_s *msg = data;
   FAR struct clk_rpmsg_s *clkrp = clk_rpmsg_get_clk(ept, msg->name);
+  int ret = -ENOENT;
 
-  if (clkrp)
+  if (clkrp && clkrp->enable)
     {
-      clk_disable(clkrp->clk);
-      clkrp->count--;
-      msg->header.result = 0;
+      ret = clk_disable(clkrp->clk);
+      if (ret >= 0)
+        {
+          clkrp->enable = false;
+        }
     }
-  else
+  else if (clkrp && !clkrp->enable)
     {
-      msg->header.result = -ENOENT;
+      ret = 0;
     }
 
+  msg->header.result = ret;
   return rpmsg_send(ept, msg, sizeof(*msg));
 }
 
@@ -459,7 +463,7 @@ static int clk_rpmsg_isenabled_handler(FAR struct rpmsg_endpoint *ept,
 
   if (clkrp)
     {
-      msg->header.result = clk_is_enabled(clkrp->clk);
+      msg->header.result = clkrp->enable;
     }
   else
     {
@@ -538,7 +542,7 @@ static void clk_rpmsg_server_unbind(FAR struct rpmsg_endpoint *ept)
   list_for_every_entry_safe(&priv->clk_list, clkrp, clkrp_tmp,
                             struct clk_rpmsg_s, node)
     {
-      while (clkrp->count--)
+      if (clkrp->enable)
         {
           clk_disable(clkrp->clk);
         }
@@ -606,7 +610,7 @@ static int clk_rpmsg_ept_cb(FAR struct rpmsg_endpoint *ept, FAR void *data,
           ret = 0;
         }
     }
-  else if (cmd < ARRAY_SIZE(g_clk_rpmsg_handler)
+  else if (cmd < nitems(g_clk_rpmsg_handler)
            && g_clk_rpmsg_handler[cmd])
     {
       hdr->response = 1;
@@ -640,7 +644,7 @@ static int clk_rpmsg_enable(FAR struct clk_s *clk)
 
   DEBUGASSERT(len <= size);
 
-  strcpy(msg->name, name);
+  strlcpy(msg->name, name, size - sizeof(*msg));
 
   return clk_rpmsg_sendrecv(ept, CLK_RPMSG_ENABLE,
                            (struct clk_rpmsg_header_s *)msg,
@@ -671,7 +675,7 @@ static void clk_rpmsg_disable(FAR struct clk_s *clk)
 
   DEBUGASSERT(len <= size);
 
-  strcpy(msg->name, name);
+  strlcpy(msg->name, name, size - sizeof(*msg));
 
   clk_rpmsg_sendrecv(ept, CLK_RPMSG_DISABLE,
                     (struct clk_rpmsg_header_s *)msg, len);
@@ -701,7 +705,7 @@ static int clk_rpmsg_is_enabled(FAR struct clk_s *clk)
 
   DEBUGASSERT(len <= size);
 
-  strcpy(msg->name, name);
+  strlcpy(msg->name, name, size - sizeof(*msg));
 
   return clk_rpmsg_sendrecv(ept, CLK_RPMSG_ISENABLED,
                            (struct clk_rpmsg_header_s *)msg, len);
@@ -734,7 +738,7 @@ static uint32_t clk_rpmsg_round_rate(FAR struct clk_s *clk, uint32_t rate,
   DEBUGASSERT(len <= size);
 
   msg->rate = rate;
-  strcpy(msg->name, name);
+  strlcpy(msg->name, name, size - sizeof(*msg));
 
   ret = clk_rpmsg_sendrecv(ept, CLK_RPMSG_ROUNDRATE,
                           (struct clk_rpmsg_header_s *)msg, len);
@@ -772,7 +776,7 @@ static int clk_rpmsg_set_rate(FAR struct clk_s *clk, uint32_t rate,
   DEBUGASSERT(len <= size);
 
   msg->rate = rate;
-  strcpy(msg->name, name);
+  strlcpy(msg->name, name, size - sizeof(*msg));
 
   return clk_rpmsg_sendrecv(ept, CLK_RPMSG_SETRATE,
                            (struct clk_rpmsg_header_s *)msg, len);
@@ -804,7 +808,7 @@ static uint32_t clk_rpmsg_recalc_rate(FAR struct clk_s *clk,
 
   DEBUGASSERT(len <= size);
 
-  strcpy(msg->name, name);
+  strlcpy(msg->name, name, size - sizeof(*msg));
 
   ret = clk_rpmsg_sendrecv(ept, CLK_RPMSG_GETRATE,
                           (struct clk_rpmsg_header_s *)msg, len);
@@ -840,7 +844,7 @@ static int clk_rpmsg_get_phase(FAR struct clk_s *clk)
 
   DEBUGASSERT(len <= size);
 
-  strcpy(msg->name, name);
+  strlcpy(msg->name, name, size - sizeof(*msg));
 
   return clk_rpmsg_sendrecv(ept, CLK_RPMSG_GETPHASE,
                            (struct clk_rpmsg_header_s *)msg, len);
@@ -871,7 +875,7 @@ static int clk_rpmsg_set_phase(FAR struct clk_s *clk, int degrees)
   DEBUGASSERT(len <= size);
 
   msg->degrees = degrees;
-  strcpy(msg->name, name);
+  strlcpy(msg->name, name, size - sizeof(*msg));
 
   return clk_rpmsg_sendrecv(ept, CLK_RPMSG_SETPHASE,
                            (struct clk_rpmsg_header_s *)msg, len);
@@ -904,8 +908,7 @@ FAR struct clk_s *clk_register_rpmsg(FAR const char *name, uint8_t flags)
       return NULL;
     }
 
-  return clk_register(name, NULL, 0, flags | CLK_IS_CRITICAL,
-                      &g_clk_rpmsg_ops, NULL, 0);
+  return clk_register(name, NULL, 0, flags, &g_clk_rpmsg_ops, NULL, 0);
 }
 
 int clk_rpmsg_server_initialize(void)

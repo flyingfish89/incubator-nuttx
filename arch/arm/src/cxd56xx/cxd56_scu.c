@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <sys/param.h>
 #include <assert.h>
 #include <debug.h>
 #include <errno.h>
@@ -98,14 +99,6 @@
 /* Disable decimation by set 15 to ratio (N bit field) */
 
 #define DECIMATION_OFF 15
-
-#ifndef MIN
-#define MIN(a, b) (((a) < (b)) ? (a) : (b))
-#endif
-
-#ifndef MAX
-#define MAX(a, b) (((a) > (b)) ? (a) : (b))
-#endif
 
 /****************************************************************************
  * Private Types
@@ -1785,7 +1778,7 @@ static struct seq_s *seq_new(void)
 
   leave_critical_section(flags);
 
-  seq = (struct seq_s *)kmm_zalloc(sizeof(struct seq_s));
+  seq = kmm_zalloc(sizeof(struct seq_s));
   if (!seq)
     {
       seq_free(sid);
@@ -1825,7 +1818,7 @@ static struct seq_s *deci_new(void)
 
   leave_critical_section(flags);
 
-  deci = (struct decimator_s *)kmm_zalloc(sizeof(struct decimator_s));
+  deci = kmm_zalloc(sizeof(struct decimator_s));
   if (!deci)
     {
       deci_free(sid);
@@ -1880,7 +1873,7 @@ static int seq_fifoinit(struct seq_s *seq, int fifoid, uint16_t fsize)
         }
     }
 
-  fifo = (struct scufifo_s *)kmm_zalloc(sizeof(struct scufifo_s));
+  fifo = kmm_zalloc(sizeof(struct scufifo_s));
   if (!fifo)
     {
       return -ENOMEM;
@@ -2244,7 +2237,7 @@ static int seq_seteventnotifier(struct scufifo_s *fifo,
 
   flags = enter_critical_section();
   priv->event[mid].signo = ev->signo;
-  priv->event[mid].pid = getpid();
+  priv->event[mid].pid = nxsched_getpid();
   priv->event[mid].arg = ev->arg;
   priv->event[mid].fifo = fifo;
   leave_critical_section(flags);
@@ -2327,7 +2320,7 @@ static int seq_setwatermark(struct seq_s *seq, int fifoid,
 
   flags = enter_critical_section();
   notify->signo = wm->signo;
-  notify->pid = getpid();
+  notify->pid = nxsched_getpid();
   notify->ts = wm->ts;
   notify->fifo = fifo;
 

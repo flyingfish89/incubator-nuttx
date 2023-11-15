@@ -651,7 +651,7 @@ static int bcmf_bus_sdio_initialize(FAR struct bcmf_dev_s *priv,
 
   /* Allocate sdio bus structure */
 
-  sbus = (FAR struct bcmf_sdio_dev_s *)kmm_malloc(sizeof(*sbus));
+  sbus = kmm_malloc(sizeof(*sbus));
   if (!sbus)
     {
       return -ENOMEM;
@@ -992,7 +992,9 @@ int bcmf_sdio_thread(int argc, char **argv)
               /* Turn off clock request. */
 
               timeout = UINT_MAX;
+#ifdef CONFIG_IEEE80211_BROADCOM_LOWPOWER
               bcmf_sdio_bus_lowpower(sbus, true);
+#endif
               continue;
             }
           else if (ret < 0)

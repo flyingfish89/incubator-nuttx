@@ -66,46 +66,19 @@
 
 int up_shmat(uintptr_t *pages, unsigned int npages, uintptr_t vaddr)
 {
-  struct tcb_s        *tcb = nxsched_self();
-  struct task_group_s *group;
-  uintptr_t            ptlast;
-  uintptr_t            ptlevel;
-  uintptr_t            paddr;
+  struct tcb_s          *tcb     = nxsched_self();
+  struct arch_addrenv_s *addrenv = &tcb->addrenv_own->addrenv;
 
   /* Sanity checks */
 
-  DEBUGASSERT(tcb && tcb->group);
+  DEBUGASSERT(tcb && tcb->addrenv_own);
   DEBUGASSERT(pages != NULL && npages > 0);
   DEBUGASSERT(vaddr >= CONFIG_ARCH_SHM_VBASE && vaddr < ARCH_SHM_VEND);
   DEBUGASSERT(MM_ISALIGNED(vaddr));
 
-  group   = tcb->group;
-  ptlevel = RV_MMU_PT_LEVELS;
+  /* Let riscv_map_pages do the work */
 
-  /* Add the references to pages[] into the caller's address environment */
-
-  for (; npages > 0; npages--)
-    {
-      /* Get the address of the last level page table */
-
-      ptlast = riscv_pgvaddr(riscv_get_pgtable(&group->tg_addrenv, vaddr));
-      if (!ptlast)
-        {
-          return -ENOMEM;
-        }
-
-      /* Then add the reference */
-
-      paddr = *pages++;
-      mmu_ln_setentry(ptlevel, ptlast, paddr, vaddr, MMU_UDATA_FLAGS);
-      vaddr += MM_PGSIZE;
-    }
-
-  /* Flush the data cache, so the changes are committed to memory */
-
-  __DMB();
-
-  return OK;
+  return riscv_map_pages(addrenv, pages, npages, vaddr, MMU_UDATA_FLAGS);
 }
 
 /****************************************************************************
@@ -127,50 +100,19 @@ int up_shmat(uintptr_t *pages, unsigned int npages, uintptr_t vaddr)
 
 int up_shmdt(uintptr_t vaddr, unsigned int npages)
 {
-  struct tcb_s        *tcb = nxsched_self();
-  struct task_group_s *group;
-  uintptr_t            ptlast;
-  uintptr_t            ptprev;
-  uintptr_t            ptlevel;
-  uintptr_t            paddr;
+  struct tcb_s          *tcb     = nxsched_self();
+  struct arch_addrenv_s *addrenv = &tcb->addrenv_own->addrenv;
 
   /* Sanity checks */
 
-  DEBUGASSERT(tcb && tcb->group);
+  DEBUGASSERT(tcb && tcb->addrenv_own);
   DEBUGASSERT(npages > 0);
   DEBUGASSERT(vaddr >= CONFIG_ARCH_SHM_VBASE && vaddr < ARCH_SHM_VEND);
   DEBUGASSERT(MM_ISALIGNED(vaddr));
 
-  group   = tcb->group;
-  ptlevel = ARCH_SPGTS;
-  ptprev  = riscv_pgvaddr(group->tg_addrenv.spgtables[ARCH_SPGTS - 1]);
-  if (!ptprev)
-    {
-      /* Something is very wrong */
+  /* Let riscv_unmap_pages do the work */
 
-      return -EFAULT;
-    }
-
-  /* Remove the references from the caller's address environment */
-
-  for (; npages > 0; npages--)
-    {
-      /* Get the current final level entry corresponding to this vaddr */
-
-      paddr = mmu_pte_to_paddr(mmu_ln_getentry(ptlevel, ptprev, vaddr));
-      ptlast = riscv_pgvaddr(paddr);
-
-      /* Then wipe the reference */
-
-      mmu_ln_clear(ptlevel + 1, ptlast, vaddr);
-      vaddr += MM_PGSIZE;
-    }
-
-  /* Flush the data cache, so the changes are committed to memory */
-
-  __DMB();
-
-  return OK;
+  return riscv_unmap_pages(addrenv, vaddr, npages);
 }
 
 #endif /* CONFIG_BUILD_KERNEL */

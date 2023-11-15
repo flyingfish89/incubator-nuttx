@@ -30,6 +30,8 @@
 #include <debug.h>
 #include <errno.h>
 
+#include <sys/param.h>
+
 #include <nuttx/nuttx.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/fs/procfs.h>
@@ -61,10 +63,6 @@
  */
 
 #define PM_LINELEN 128
-
-#ifndef ARRAY_SIZE
-#  define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-#endif
 
 typedef ssize_t (*pm_read_t)(FAR struct file *filep,
                              FAR char *buffer, size_t buflen);
@@ -116,6 +114,8 @@ static int     pm_rewinddir(FAR struct fs_dirent_s *dir);
 
 static int     pm_stat(FAR const char *relpath, FAR struct stat *buf);
 
+static int     pm_get_file_index(FAR const char *relpath);
+
 /****************************************************************************
  * Public Data
  ****************************************************************************/
@@ -125,7 +125,7 @@ static int     pm_stat(FAR const char *relpath, FAR struct stat *buf);
  * with any compiler.
  */
 
-const struct procfs_operations pm_operations =
+const struct procfs_operations g_pm_operations =
 {
   pm_open,       /* open */
   pm_close,      /* close */
@@ -162,6 +162,26 @@ static FAR const char *g_pm_state[PM_COUNT] =
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: pm_get_file_index
+ ****************************************************************************/
+
+static int pm_get_file_index(FAR const char *relpath)
+{
+  int i;
+
+  for (i = 0; i < nitems(g_pm_files); i++)
+    {
+      if (strncmp(relpath, g_pm_files[i].name,
+                  strlen(g_pm_files[i].name)) == 0)
+        {
+          return i;
+        }
+    }
+
+  return -1;
+}
+
+/****************************************************************************
  * Name: pm_open
  ****************************************************************************/
 
@@ -183,26 +203,23 @@ static int pm_open(FAR struct file *filep, FAR const char *relpath,
       return -EACCES;
     }
 
+  relpath += strlen("pm/");
+  i = pm_get_file_index(relpath);
+  if (i < 0)
+    {
+      return -ENOENT;
+    }
+
   /* Allocate a container to hold the file attributes */
 
-  pmfile = (FAR struct pm_file_s *)kmm_zalloc(sizeof(struct pm_file_s));
+  pmfile = kmm_zalloc(sizeof(struct pm_file_s));
   if (!pmfile)
     {
       ferr("ERROR: Failed to allocate file attributes\n");
       return -ENOMEM;
     }
 
-  relpath += strlen("pm/");
-  for (i = 0; i < ARRAY_SIZE(g_pm_files); i++)
-    {
-      if (strncmp(relpath, g_pm_files[i].name,
-                  strlen(g_pm_files[i].name)) == 0)
-        {
-          pmfile->read = g_pm_files[i].read;
-          break;
-        }
-    }
-
+  pmfile->read = g_pm_files[i].read;
   pmfile->domain = atoi(relpath + strlen(g_pm_files[i].name));
 
   DEBUGASSERT(pmfile->read);
@@ -268,7 +285,7 @@ static ssize_t pm_read_state(FAR struct file *filep, FAR char *buffer,
 
   totalsize += copysize;
 
-  flags = pm_lock(pmfile->domain);
+  flags = pm_domain_lock(pmfile->domain);
 
   for (state = 0; state < PM_COUNT; state++)
     {
@@ -300,7 +317,7 @@ static ssize_t pm_read_state(FAR struct file *filep, FAR char *buffer,
       totalsize += copysize;
     }
 
-  pm_unlock(pmfile->domain, flags);
+  pm_domain_unlock(pmfile->domain, flags);
 
   filep->f_pos += totalsize;
   return totalsize;
@@ -340,7 +357,7 @@ static ssize_t pm_read_wakelock(FAR struct file *filep, FAR char *buffer,
 
   totalsize += copysize;
 
-  flags = pm_lock(pmfile->domain);
+  flags = pm_domain_lock(pmfile->domain);
 
   entry = dq_peek(&dom->wakelockall);
   for (; entry && totalsize < buflen; entry = dq_next(entry))
@@ -374,7 +391,7 @@ static ssize_t pm_read_wakelock(FAR struct file *filep, FAR char *buffer,
       totalsize += copysize;
     }
 
-  pm_unlock(pmfile->domain, flags);
+  pm_domain_unlock(pmfile->domain, flags);
 
   filep->f_pos += totalsize;
   return totalsize;
@@ -416,7 +433,7 @@ static int pm_dup(FAR const struct file *oldp, FAR struct file *newp)
 
   /* Allocate a new container to hold the task and attribute selection */
 
-  newattr = (FAR struct pm_file_s *)kmm_malloc(sizeof(struct pm_file_s));
+  newattr = kmm_malloc(sizeof(struct pm_file_s));
   if (!newattr)
     {
       ferr("ERROR: Failed to allocate file attributes\n");
@@ -462,7 +479,7 @@ static int pm_opendir(FAR const char *relpath, FAR struct fs_dirent_s **dir)
   /* Initialize base structure components */
 
   level1->level    = 1;
-  level1->nentries = CONFIG_PM_NDOMAINS * ARRAY_SIZE(g_pm_files);
+  level1->nentries = CONFIG_PM_NDOMAINS * nitems(g_pm_files);
 
   *dir = (FAR struct fs_dirent_s *)level1;
   return OK;
@@ -511,8 +528,8 @@ static int pm_readdir(FAR struct fs_dirent_s *dir,
       return -ENOENT;
     }
 
-  domain = index / ARRAY_SIZE(g_pm_files);
-  fpos   = index % ARRAY_SIZE(g_pm_files);
+  domain = index / nitems(g_pm_files);
+  fpos   = index % nitems(g_pm_files);
 
   entry->d_type = DTYPE_FILE;
   snprintf(entry->d_name, NAME_MAX + 1, "%s%d",
@@ -557,6 +574,12 @@ static int pm_stat(FAR const char *relpath, FAR struct stat *buf)
     }
   else
     {
+      relpath += strlen("pm/");
+      if (pm_get_file_index(relpath) < 0)
+        {
+          return -ENOENT;
+        }
+
       buf->st_mode = S_IFREG | S_IROTH | S_IRGRP | S_IRUSR;
     }
 

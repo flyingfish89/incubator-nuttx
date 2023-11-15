@@ -33,6 +33,7 @@
 
 #include <nuttx/config.h>
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <inttypes.h>
 #include <stdint.h>
@@ -61,10 +62,6 @@
 
 #if !defined(CONFIG_SCHED_WORKQUEUE)
 #  error "Worker thread support is required (CONFIG_SCHED_WORKQUEUE)"
-#endif
-
-#ifndef MIN
-#  define MIN(a,b)  (((a) < (b)) ? (a) : (b))
 #endif
 
 #define GS2200MWORK LPWORK
@@ -274,7 +271,8 @@ static enum pkt_type_e _spi_err_to_pkt_type(enum spi_status_e s)
 
       default:
         r = TYPE_UNMATCH;
-        ASSERT(false);
+        PANIC();
+        break;
     }
 
   return r;
@@ -303,7 +301,7 @@ static uint8_t _cid_to_uint8(char c)
   else
     {
       ret = 0xff;
-      ASSERT(false);
+      PANIC();
     }
 
   return ret;
@@ -701,11 +699,10 @@ static ssize_t gs2200m_read(FAR struct file *filep, FAR char *buffer,
   FAR struct gs2200m_dev_s *dev;
   int ret;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  dev = (FAR struct gs2200m_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  dev = inode->i_private;
 
   ASSERT(1 == len);
 
@@ -1102,7 +1099,7 @@ static void _parse_pkt_in_s1(FAR struct pkt_ctx_s *pkt_ctx,
   ASSERT(pkt_ctx->ptr > pkt_ctx->head);
   msize = pkt_ctx->ptr - pkt_ctx->head;
 
-  msg = (FAR char *)kmm_calloc(msize + 1, 1);
+  msg = kmm_calloc(msize + 1, 1);
   ASSERT(msg);
 
   memcpy(msg, pkt_ctx->head, msize);
@@ -1191,7 +1188,7 @@ static void _parse_pkt_in_s2(FAR struct pkt_ctx_s *pkt_ctx,
   else
     {
       wlerr("** <ESC>%c not supported\n", c);
-      ASSERT(false);
+      PANIC();
     }
 }
 
@@ -1352,7 +1349,7 @@ static enum pkt_type_e _parse_pkt(FAR uint8_t *p, uint16_t len,
           break;
 
         default:
-          ASSERT(false);
+          PANIC();
           break;
         }
     }
@@ -1376,7 +1373,7 @@ static void _dup_pkt_dat_and_notify(FAR struct gs2200m_dev_s *dev,
 
   /* Allocate a new pkt_dat */
 
-  pkt_dat = (FAR struct pkt_dat_s *)kmm_malloc(sizeof(struct pkt_dat_s));
+  pkt_dat = kmm_malloc(sizeof(struct pkt_dat_s));
   ASSERT(pkt_dat);
 
   /* Copy pkt_dat0 to pkt_dat */
@@ -1385,7 +1382,7 @@ static void _dup_pkt_dat_and_notify(FAR struct gs2200m_dev_s *dev,
 
   /* Allocate bulk data and copy */
 
-  pkt_dat->data = (FAR uint8_t *)kmm_malloc(pkt_dat0->len);
+  pkt_dat->data = kmm_malloc(pkt_dat0->len);
   ASSERT(pkt_dat->data);
   memcpy(pkt_dat->data, pkt_dat0->data, pkt_dat0->len);
 
@@ -1421,7 +1418,7 @@ static enum pkt_type_e gs2200m_recv_pkt(FAR struct gs2200m_dev_s *dev,
   uint16_t len;
   FAR uint8_t *p;
 
-  p = (FAR uint8_t *)kmm_calloc(MAX_PKT_LEN, 1);
+  p = kmm_calloc(MAX_PKT_LEN, 1);
   ASSERT(p);
 
   s = gs2200m_hal_read(dev, p, &len);
@@ -1882,7 +1879,7 @@ gs2200m_create_clnt(FAR struct gs2200m_dev_s *dev,
     }
   else
     {
-      ASSERT(false);
+      PANIC();
     }
 
   /* Initialize pkt_dat and send  */
@@ -2352,8 +2349,9 @@ static int gs2200m_ioctl_connect(FAR struct gs2200m_dev_s *dev,
 
       default:
         wlerr("+++ error: type=%d\n", type);
-        ASSERT(false);
+        PANIC();
         ret = -EINVAL;
+        break;
     }
 
   wlinfo("++ end: cid=%c (type=%d,ret=%d)\n", cid, type, ret);
@@ -2968,11 +2966,10 @@ static int gs2200m_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   FAR struct gs2200m_dev_s *dev;
   int ret = -EINVAL;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  dev = (FAR struct gs2200m_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  dev = inode->i_private;
 
   /* Lock the device */
 
@@ -3106,11 +3103,11 @@ static int gs2200m_poll(FAR struct file *filep, FAR struct pollfd *fds,
   int ret = OK;
 
   wlinfo("== setup:%d\n", (int)setup);
-  DEBUGASSERT(filep && fds);
+  DEBUGASSERT(fds);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  dev = (FAR struct gs2200m_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  dev = inode->i_private;
 
   ret = nxmutex_lock(&dev->dev_lock);
   if (ret < 0)
@@ -3198,7 +3195,7 @@ repeat:
 
   /* Allocate a new pkt_dat and initialize it */
 
-  pkt_dat = (FAR struct pkt_dat_s *)kmm_malloc(sizeof(struct pkt_dat_s));
+  pkt_dat = kmm_malloc(sizeof(struct pkt_dat_s));
   ASSERT(NULL != pkt_dat);
 
   memset(pkt_dat, 0, sizeof(struct pkt_dat_s));
@@ -3491,7 +3488,7 @@ FAR void *gs2200m_register(FAR const char *devpath,
   int size;
 
   size = sizeof(struct gs2200m_dev_s);
-  dev = (FAR struct gs2200m_dev_s *)kmm_malloc(size);
+  dev = kmm_malloc(size);
   if (!dev)
     {
       wlerr("Failed to allocate instance.\n");
@@ -3506,6 +3503,12 @@ FAR void *gs2200m_register(FAR const char *devpath,
   dev->pfd   = NULL;
 
   nxmutex_init(&dev->dev_lock);
+
+  if (!dev->path)
+    {
+      wlerr("Failed to allocate driver path.\n");
+      goto errout;
+    }
 
   ret = gs2200m_initialize(dev, lower);
   if (ret < 0)
@@ -3528,10 +3531,16 @@ FAR void *gs2200m_register(FAR const char *devpath,
       goto errout;
     }
 
+  /* Set d_pktsize and d_llhdrlen to show mtu info correctly */
+
+  dev->net_dev.d_pktsize  = MAX_PKT_LEN;
+  dev->net_dev.d_llhdrlen = 0;
+
   return dev;
 
 errout:
   nxmutex_destroy(&dev->dev_lock);
+  lib_free(dev->path);
   kmm_free(dev);
   return NULL;
 }

@@ -1,6 +1,7 @@
 .. include:: /substitutions.rst
 .. _simulator:
 
+=========
 Simulator
 =========
 
@@ -13,10 +14,31 @@ having a piece of embedded hardware.
 This guide assumes you're on Linux. It works on Windows and Mac too— if you know how,
 submit a PR to improve this guide!
 
-.. todo:: Add Mac and Windows instructions
+.. todo:: Windows instructions
+
+Prerequisites For macOS
+=======================
+
+We need ``genromfs`` to build simulators(NON GUI).
+
+   .. code-block:: console
+
+      $ git clone https://github.com/chexum/genromfs.git
+      $ cd genromfs
+      $ make
+      $ make install
+
+Now Copy the built `genromfs` `exec` to /opt/local/bin.
+
+For GUI Applications we need X11 Libraries, libx11 can also be built using Homebrew or by Installing XQuartz.
+
+   .. code-block:: console
+   
+      $ sudo port install xorg-libX11
+      $ sudo port install xorg-server
 
 Compiling
----------
+=========
 
 #. Configure the Simulator
 
@@ -70,8 +92,10 @@ Compiling
        $
        $ # we're back at the Linux prompt.
 
+.. _simulator_accessing_the_network:
+
 Accessing the Network
----------------------
+=====================
 
 #. Here we'll use the ``sim:tcpblaster`` configuration because it comes with networking
    that is ready to use.
@@ -179,7 +203,7 @@ Accessing the Network
    Success!
 
 Testing / capturing TCP network traffic
----------------------------------------
+=======================================
 
 #. Start Wireshark (or tcpdump) on Linux and capture the appeared tap0 interface.
 
@@ -205,7 +229,7 @@ Testing / capturing TCP network traffic
 #. Observe TCP network traffic in Wireshark / tcpdump on Linux.
 
 Stopping
---------
+========
 
 #. The normal way to stop:
 
@@ -234,6 +258,6 @@ Stopping
        $ sudo ./tools/simhostroute.sh wlan0 off
 
 Debugging
----------
+=========
 
 You can debug the simulator like any regular Linux program.

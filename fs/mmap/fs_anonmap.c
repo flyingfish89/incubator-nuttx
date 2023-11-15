@@ -24,7 +24,11 @@
 
 #include <nuttx/config.h>
 #include <nuttx/kmalloc.h>
+#include <nuttx/sched.h>
+#include <assert.h>
 #include <debug.h>
+
+#include "fs_anonmap.h"
 
 /****************************************************************************
  * Private Functions
@@ -51,7 +55,7 @@ static int unmap_anonymous(FAR struct task_group_s *group,
    * simulate the unmapping.
    */
 
-  offset = start - entry->vaddr;
+  offset = (uintptr_t)start - (uintptr_t)entry->vaddr;
   if (offset + length < entry->length)
     {
       ferr("ERROR: Cannot umap without unmapping to the end\n");
@@ -132,7 +136,7 @@ int map_anonymous(FAR struct mm_map_entry_s *entry, bool kernel)
   entry->munmap = unmap_anonymous;
   entry->priv.i = kernel;
 
-  ret = mm_map_add(entry);
+  ret = mm_map_add(get_current_mm(), entry);
   if (ret < 0)
     {
       if (kernel)

@@ -29,8 +29,34 @@
  *
  ****************************************************************************/
 
+#include "libc.h"
+
+#ifdef LIBC_BUILD_STRCMP
+
 /* Very similar to the generic code, but uses Thumb2 as implemented
    in ARMv7-M.  */
+
+#ifdef __ARM_BIG_ENDIAN
+#define S2LO lsl
+#define S2LOEQ lsleq
+#define S2HI lsr
+#define MSB 0x000000ff
+#define LSB 0xff000000
+#define BYTE0_OFFSET 24
+#define BYTE1_OFFSET 16
+#define BYTE2_OFFSET 8
+#define BYTE3_OFFSET 0
+#else /* not  __ARM_BIG_ENDIAN */
+#define S2LO lsr
+#define S2LOEQ lsreq
+#define S2HI lsl
+#define BYTE0_OFFSET 0
+#define BYTE1_OFFSET 8
+#define BYTE2_OFFSET 16
+#define BYTE3_OFFSET 24
+#define MSB 0xff000000
+#define LSB 0x000000ff
+#endif /* not  __ARM_BIG_ENDIAN */
 
 /* Parameters and result.  */
 #define src1		r0
@@ -43,6 +69,14 @@
 #define tmp2		r5
 #define tmp1		r12
 #define syndrome	r12	/* Overlaps tmp1 */
+
+	.macro def_fn f p2align=0
+	.text
+	.p2align \p2align
+	.global \f
+	.type \f, %function
+\f:
+	.endm
 
 	.thumb
 	.syntax unified
@@ -99,7 +133,7 @@ def_fn strcmp
 	   both cases the other bits in RESULT are all zero.  For DATA2 the
 	   interesting byte is at the other end of the word, but the
 	   other bits are not necessarily zero.	 We need a signed result
-	   representing the differnece in the unsigned bytes, so for the
+	   representing the difference in the unsigned bytes, so for the
 	   little-endian case we can't just shift the interesting bits
 	   up.	*/
 #ifdef __ARM_BIG_ENDIAN
@@ -113,7 +147,7 @@ def_fn strcmp
 
 
 #if 0
-	/* The assembly code below is based on the following alogrithm.	 */
+	/* The assembly code below is based on the following algorithm.	 */
 #ifdef __ARM_BIG_ENDIAN
 #define RSHIFT <<
 #define LSHIFT >>
@@ -379,3 +413,5 @@ def_fn strcmp
 	bx	lr
 	.cfi_endproc
 	.size strcmp, . - strcmp
+
+#endif

@@ -209,11 +209,11 @@
 /* Debug ********************************************************************/
 
 #ifdef CONFIG_MX25L_DEBUG
-# define mxlerr(format, ...)    _err(format, ##__VA_ARGS__)
-# define mxlinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#  define mxlerr(format, ...)    _err(format, ##__VA_ARGS__)
+#  define mxlinfo(format, ...)   _info(format, ##__VA_ARGS__)
 #else
-# define mxlerr(x...)
-# define mxlinfo(x...)
+#  define mxlerr(x...)
+#  define mxlinfo(x...)
 #endif
 
 /****************************************************************************
@@ -1053,6 +1053,8 @@ static int mx25l_ioctl(FAR struct mtd_dev_s *dev, int cmd, unsigned long arg)
             (FAR struct mtd_geometry_s *)((uintptr_t)arg);
           if (geo)
             {
+              memset(geo, 0, sizeof(*geo));
+
               /* Populate the geometry structure with information need to
                * know the capacity and how to access the device.
                *
@@ -1159,7 +1161,7 @@ FAR struct mtd_dev_s *mx25l_initialize_spi(FAR struct spi_dev_s *dev)
    * have to be extended to handle multiple FLASH parts on the same SPI bus.
    */
 
-  priv = (FAR struct mx25l_dev_s *)kmm_zalloc(sizeof(struct mx25l_dev_s));
+  priv = kmm_zalloc(sizeof(struct mx25l_dev_s));
   if (priv)
     {
       /* Initialize the allocated structure. (unsupported methods were
@@ -1196,7 +1198,7 @@ FAR struct mtd_dev_s *mx25l_initialize_spi(FAR struct spi_dev_s *dev)
 #ifdef CONFIG_MX25L_SECTOR512        /* Simulate a 512 byte sector */
           /* Allocate a buffer for the erase block cache */
 
-          priv->sector = (FAR uint8_t *)kmm_malloc(1 << priv->sectorshift);
+          priv->sector = kmm_malloc(1 << priv->sectorshift);
           if (!priv->sector)
             {
               /* Allocation failed! Discard all of that work we just did and

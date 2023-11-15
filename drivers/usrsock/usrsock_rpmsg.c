@@ -94,7 +94,6 @@ static int usrsock_rpmsg_send_dns_request(FAR void *arg,
 
   dns->head.reqid = USRSOCK_RPMSG_DNS_REQUEST;
   dns->head.xid = 0;
-  dns->head.reserved = 0;
   dns->addrlen = addrlen;
   memcpy(dns + 1, addr, addrlen);
 
@@ -199,7 +198,7 @@ int usrsock_request(FAR struct iovec *iov, unsigned int iovcnt)
   nxsem_get_value(&priv->wait, &ret);
   if (ret <= 0)
     {
-      net_lockedwait_uninterruptible(&priv->wait);
+      net_sem_wait_uninterruptible(&priv->wait);
       nxsem_post(&priv->wait);
     }
 
